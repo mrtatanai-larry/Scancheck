@@ -1,0 +1,10 @@
+# Python dependencies for ScanCheck System OMR/OCR processing
+opencv-python>=4.8.0
+opencv-contrib-python>=4.8.0
+numpy>=1.24.0
+# Paddle packages are optional and may not have wheels for very new Python releases.
+paddleocr>=2.7.0; python_version < "3.14"
+paddlepaddle>=2.5.0; python_version < "3.14"
+# QR Code support
+qrcode[pil]>=7.4.0
+pyzbar>=0.1.9

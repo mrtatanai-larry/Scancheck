@@ -1,0 +1,7 @@
+# Python dependencies for ScanCheck System OMR processing
+opencv-python>=4.8.0
+opencv-contrib-python>=4.8.0
+numpy>=1.24.0
+# QR Code support
+qrcode[pil]>=7.4.0
+pyzbar>=0.1.9

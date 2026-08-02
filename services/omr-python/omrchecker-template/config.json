@@ -1,0 +1,23 @@
+{
+  "dimensions": {
+    "display_height": 1000,
+    "display_width": 700,
+    "processing_height": 2200,
+    "processing_width": 1600
+  },
+  "threshold_params": {
+    "MIN_JUMP": 35,
+    "MIN_GAP": 30,
+    "CONFIDENT_SURPLUS": 10
+  },
+  "alignment_params": {
+    "auto_align": true
+  },
+  "outputs": {
+    "show_image_level": 0,
+    "save_image_level": 0,
+    "save_detections": true,
+    "filter_out_multimarked_files": false,
+    "debug_calibration": false
+  }
+}

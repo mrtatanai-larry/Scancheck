@@ -1,0 +1,92 @@
+{
+  "pageDimensions": [1000, 1400],
+  "bubbleDimensions": [19, 19],
+  "fieldBlocks": {
+    "entry_type": {
+      "fieldLabels": ["entry_type"],
+      "origin": [666, 269],
+      "bubblesGap": 27,
+      "labelsGap": 27,
+      "bubbleValues": ["NEW STUDENT", "TRANSFEREE", "PASSINHON", "NON-PASSINHON"],
+      "direction": "vertical"
+    },
+    "equity_group": {
+      "fieldLabels": ["equity_group"],
+      "origin": [830, 269],
+      "bubblesGap": 27,
+      "labelsGap": 27,
+      "bubbleValues": ["PWDS", "IPS", "SOLO PARENT", "MAGNA CARTA"],
+      "direction": "vertical"
+    },
+    "q1_10": {
+      "fieldType": "QTYPE_MCQ4",
+      "fieldLabels": ["q1..10"],
+      "origin": [119, 466],
+      "bubblesGap": 28,
+      "labelsGap": 24
+    },
+    "q11_20": {
+      "fieldType": "QTYPE_MCQ4",
+      "fieldLabels": ["q11..20"],
+      "origin": [348, 466],
+      "bubblesGap": 28,
+      "labelsGap": 24
+    },
+    "q21_30": {
+      "fieldType": "QTYPE_MCQ4",
+      "fieldLabels": ["q21..30"],
+      "origin": [584, 466],
+      "bubblesGap": 28,
+      "labelsGap": 24
+    },
+    "q31_40": {
+      "fieldType": "QTYPE_MCQ4",
+      "fieldLabels": ["q31..40"],
+      "origin": [812, 466],
+      "bubblesGap": 28,
+      "labelsGap": 24
+    },
+    "q41_50": {
+      "fieldType": "QTYPE_MCQ4",
+      "fieldLabels": ["q41..50"],
+      "origin": [120, 748],
+      "bubblesGap": 28,
+      "labelsGap": 24
+    },
+    "q51_60": {
+      "fieldType": "QTYPE_MCQ4",
+      "fieldLabels": ["q51..60"],
+      "origin": [348, 748],
+      "bubblesGap": 28,
+      "labelsGap": 24
+    },
+    "q61_70": {
+      "fieldType": "QTYPE_MCQ4",
+      "fieldLabels": ["q61..70"],
+      "origin": [584, 748],
+      "bubblesGap": 28,
+      "labelsGap": 24
+    },
+    "q71_80": {
+      "fieldType": "QTYPE_MCQ4",
+      "fieldLabels": ["q71..80"],
+      "origin": [812, 748],
+      "bubblesGap": 28,
+      "labelsGap": 24
+    },
+    "q81_90": {
+      "fieldType": "QTYPE_MCQ4",
+      "fieldLabels": ["q81..90"],
+      "origin": [236, 1029],
+      "bubblesGap": 28,
+      "labelsGap": 24
+    },
+    "q91_100": {
+      "fieldType": "QTYPE_MCQ4",
+      "fieldLabels": ["q91..100"],
+      "origin": [696, 1029],
+      "bubblesGap": 28,
+      "labelsGap": 24
+    }
+  }
+}

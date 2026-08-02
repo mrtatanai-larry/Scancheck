@@ -1,0 +1,8 @@
+{
+  "input_size": 28,
+  "accuracy": 0.9993333333333333,
+  "samples": 15000,
+  "epochs": 5,
+  "model": "MLP(784->256->1)",
+  "params": 201217
+}

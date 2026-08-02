@@ -1,0 +1,39 @@
+# Runtime state
+.runtime/
+.runtime-*/
+.runtime-backups/
+
+# Committed runtime artifacts (contain student data / logs)
+apps/api/scancheck.db
+apps/api/server.log
+
+# OMR processing output
+services/omr-python/omrchecker-template/out/
+
+# Node
+node_modules/
+apps/api/node_modules/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+# Logs
+*.log
+
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/
+.vs/
+
+# Android build artifacts
+android/.gradle/
+android/build/
+android/app/build/
+
+# Temp
+*.tmp

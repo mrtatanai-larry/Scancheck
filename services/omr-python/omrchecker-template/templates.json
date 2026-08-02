@@ -1,0 +1,15 @@
+{
+  "templates": [
+    {
+      "key": "repo-default-100",
+      "label": "Repository Multi-Subject 100",
+      "questionCount": 100,
+      "sheetFormat": "multi-subject",
+      "templateType": "multi_subject",
+      "templateFile": "template.json",
+      "configFile": "config.json",
+      "isDefault": true,
+      "enabled": true
+    }
+  ]
+}

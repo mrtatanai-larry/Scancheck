@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Print Answer Sheet - ScanCheck</title>
+    <link href="css/styles.css" rel="stylesheet">
+</head>
+<body class="sheet-print">
+    <div id="omr-sheet"></div>
+
+    <script src="js/config.js"></script>
+    <script>
+        function loadScript(src) {
+            return new Promise((resolve, reject) => {
+                const s = document.createElement('script');
+                s.src = src;
+                s.onload = resolve;
+                s.onerror = () => reject(new Error(`Failed to load script: ${src}`));
+                document.head.appendChild(s);
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const quizId = urlParams.get('quizId');
+            const studentId = urlParams.get('studentId');
+
+            let quiz = JSON.parse(localStorage.getItem('scancheck_current_quiz'));
+            
+            // If we don't have the quiz in local storage, or it's the wrong one, 
+            // we could fetch it here if needed, but for now we assume it's set.
+            
+            if (quiz) {
+                try {
+                    await loadScript('js/answer-sheet.js');
+                } catch (e) {
+                    document.body.innerHTML = `<h1>Error: ${e.message}</h1>`;
+                    return;
+                }
+
+                // Update student ID if provided in URL
+                if (studentId) quiz.studentId = studentId;
+                
+                // The multi-subject script initializes on DOMContentLoaded, but we're loading it after that.
+                // Create the generator directly from the global class binding.
+                if (!window.answerSheetGenerator && typeof MultiSubjectAnswerSheetGenerator !== 'undefined') {
+                    window.answerSheetGenerator = new MultiSubjectAnswerSheetGenerator();
+                }
+                if (window.answerSheetGenerator) {
+                    window.answerSheetGenerator.generate(quiz);
+                } else {
+                    document.body.innerHTML = '<h1>Error: Multi-subject sheet generator not available.</h1>';
+                    return;
+                }
+
+                function imagesLoaded(root) {
+                    const imgs = root.querySelectorAll('img');
+                    return Promise.all(
+                        [...imgs].map((img) =>
+                            img.complete
+                                ? Promise.resolve()
+                                : new Promise((resolve) => {
+                                      img.addEventListener('load', resolve, { once: true });
+                                      img.addEventListener('error', resolve, { once: true });
+                                  })
+                        )
+                    );
+                }
+
+                const mount = document.getElementById('omr-sheet');
+                await imagesLoaded(mount);
+                if (document.fonts && document.fonts.ready) {
+                    try {
+                        await document.fonts.ready;
+                    } catch (_) {
+                        /* ignore */
+                    }
+                }
+                requestAnimationFrame(() => window.print());
+            } else {
+                document.body.innerHTML = '<h1>Error: No quiz data found to print.</h1>';
+            }
+        });
+    </script>
+</body>
+</html>
