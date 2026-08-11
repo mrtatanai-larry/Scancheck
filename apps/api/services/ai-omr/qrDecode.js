@@ -4,12 +4,26 @@ const jsQR = require('jsqr');
 function parseQrPayload(text) {
     const raw = String(text || '').trim();
     if (!raw) return {};
+    let decoded = raw;
     try {
-        const parsed = JSON.parse(raw);
-        return parsed && typeof parsed === 'object' ? parsed : { raw };
+        decoded = decodeURIComponent(raw);
     } catch (_err) {
-        const params = new URLSearchParams(raw.includes('?') ? raw.split('?').pop() : raw);
-        const data = { raw };
+        decoded = raw;
+    }
+    if (decoded !== raw) {
+        try {
+            const parsed = JSON.parse(decoded);
+            if (parsed && typeof parsed === 'object') return parsed;
+        } catch (_err) {
+            // fall through to query-style parsing below
+        }
+    }
+    try {
+        const parsed = JSON.parse(decoded);
+        return parsed && typeof parsed === 'object' ? parsed : { raw: decoded };
+    } catch (_err) {
+        const params = new URLSearchParams(decoded.includes('?') ? decoded.split('?').pop() : decoded);
+        const data = { raw: decoded };
         for (const [key, value] of params.entries()) {
             data[key] = value;
         }
