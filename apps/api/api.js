@@ -10,6 +10,13 @@ const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const Jimp = require('jimp');
 const runtimePaths = require('./config/paths');
+const { runAiOmrScan, runAiOmrBenchmark, identifyLayout } = require('./services/ai-omr/aiOmrService');
+const {
+    loadAiOmrSettings,
+    saveAiOmrSettings,
+    publicAiOmrSettings
+} = require('./services/ai-omr/settingsStore');
+const { GeminiProvider } = require('./services/ai-omr/providers/geminiProvider');
 
 runtimePaths.ensureRuntimeDirs();
 
@@ -88,6 +95,17 @@ function readImagePayload(input) {
     }
 
     throw new Error('Image data must be a base64 data URL or existing upload path');
+}
+
+function inferImageMimeType(input) {
+    const value = String(input || '').trim();
+    const dataUrlMatch = value.match(/^data:([A-Za-z-+\/]+);base64,/);
+    if (dataUrlMatch) return dataUrlMatch[1];
+    const extension = path.extname(value).replace('.', '').toLowerCase();
+    if (extension === 'png') return 'image/png';
+    if (extension === 'webp') return 'image/webp';
+    if (extension === 'gif') return 'image/gif';
+    return 'image/jpeg';
 }
 
 function runFilledCircleDetector(imageBuffer, examId = null) {
@@ -310,7 +328,10 @@ function runGeneratedLayoutOmr(imageBuffer, options = {}) {
         threshold: Number(options.threshold) || 0.38,
         requestId: String(options.requestId || ''),
         debugProblemQuestions: Boolean(options.debugProblemQuestions),
-        debugRatios: Boolean(options.debugRatios)
+        debugRatios: Boolean(options.debugRatios),
+        forensicDebug: Boolean(options.forensicDebug),
+        scanId: options.scanId || undefined,
+        scanFile: options.scanFile || undefined
     };
 
     return new Promise((resolve, reject) => {
@@ -1109,11 +1130,11 @@ function expandStatusFilterValues(value) {
 }
 
 const DEFAULT_SUBJECT_CONFIG = [
-    { code: 'MATH', name: 'MATHEMATICS', questions: 20 },
     { code: 'ENG', name: 'ENGLISH', questions: 20 },
     { code: 'SCI', name: 'SCIENCE', questions: 20 },
-    { code: 'SOC', name: 'SOCIAL STUDIES', questions: 20 },
-    { code: 'FIL', name: 'FILIPINO', questions: 20 }
+    { code: 'MATH', name: 'MATHEMATICS', questions: 20 },
+    { code: 'GEN', name: 'GENERAL KNOWLEDGE', questions: 20 },
+    { code: 'ABS', name: 'ABSTRACT REASONING', questions: 20 }
 ];
 
 function parseSubjectConfigValue(value) {
@@ -1545,6 +1566,7 @@ function normalizeQrIdentityData(rawBarcodeData) {
 
     return {
         sheetId: firstNonEmpty(source.sheetId, source.sheet_id, source.formId, source.form_id),
+        sheet_id: firstNonEmpty(source.sheet_id, source.sheetId, source.formId, source.form_id),
         studentId: firstNonEmpty(source.studentId, source.student_id, source.id, source.studentNo, source.student_no),
         examId: firstNonEmpty(source.examId, source.exam_id, source.quizId, source.quiz_id, source.testId, source.test_id),
         exam_id: firstNonEmpty(source.exam_id, source.examId, source.quizId, source.quiz_id, source.testId, source.test_id),
@@ -1582,7 +1604,7 @@ function firstNonEmptyText(...values) {
 
 async function resolveStudentMetadataFromQr(barcodeData = {}, quizId = null) {
     const qr = normalizeQrIdentityData(barcodeData);
-    const sheetId = firstNonEmptyText(qr.sheetId, qr.studentId);
+    const sheetId = firstNonEmptyText(qr.sheetId, qr.sheet_id, qr.studentId);
     const examId = firstNonEmptyText(qr.examId, qr.exam_id);
     const selectedQuizId = firstNonEmptyText(quizId);
 
@@ -1591,7 +1613,8 @@ async function resolveStudentMetadataFromQr(barcodeData = {}, quizId = null) {
     }
 
     const fromRow = (row = {}) => ({
-        studentId: firstNonEmptyText(row.student_id, sheetId, qr.studentId),
+        sheetId: firstNonEmptyText(row.sheet_id, sheetId, qr.sheetId, qr.sheet_id),
+        studentId: firstNonEmptyText(row.student_id),
         studentName: firstNonPlaceholderName(row.student_name, row.studentName),
         course: cleanExtractedField(row.course || '', 'course') || '',
         age: firstNonEmptyText(row.age),
@@ -1603,13 +1626,13 @@ async function resolveStudentMetadataFromQr(barcodeData = {}, quizId = null) {
 
     if (sheetId) {
         const recordParams = [sheetId];
-        let recordWhere = 'student_id = ?';
+        let recordWhere = 'sheet_id = ?';
         if (selectedQuizId) {
             recordWhere += ' AND quiz_id = ?';
             recordParams.push(selectedQuizId);
         }
         const recordRows = await database.query(
-            `SELECT student_id, student_name, course, age, room_no, seat_no, 'records' AS _source
+            `SELECT sheet_id, student_id, student_name, course, age, room_no, seat_no, 'records' AS _source
              FROM records
              WHERE ${recordWhere}
              ORDER BY timestamp DESC, id DESC
@@ -1622,13 +1645,13 @@ async function resolveStudentMetadataFromQr(barcodeData = {}, quizId = null) {
         }
 
         const scanParams = [sheetId];
-        let scanWhere = 'student_id = ?';
+        let scanWhere = 'sheet_id = ?';
         if (selectedQuizId) {
             scanWhere += ' AND quiz_id = ?';
             scanParams.push(selectedQuizId);
         }
         const scanRows = await database.query(
-            `SELECT student_id, student_name, course, room_no, seat_no, 'scans' AS _source
+            `SELECT sheet_id, student_id, student_name, course, room_no, seat_no, 'scans' AS _source
              FROM scans
              WHERE ${scanWhere}
              ORDER BY timestamp DESC, id DESC
@@ -1664,12 +1687,12 @@ async function resolveStudentMetadataFromQr(barcodeData = {}, quizId = null) {
         if (paperMeta.studentName) {
             return {
                 ...paperMeta,
-                studentId: firstNonEmptyText(paperMeta.studentId, sheetId)
+                sheetId: firstNonEmptyText(paperMeta.sheetId, sheetId)
             };
         }
     }
 
-    return sheetId ? { studentId: sheetId, source: 'qr' } : {};
+    return sheetId ? { sheetId, source: 'qr' } : {};
 }
 
 async function createAutomaticRecord({
@@ -1873,6 +1896,54 @@ router.get('/health', (req, res) => {
     res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
+router.get('/qr', (req, res) => {
+    try {
+        const data = String(req.query.data || '');
+        if (!data) {
+            return res.status(400).json({ error: 'QR data is required' });
+        }
+        if (data.length > 4096) {
+            return res.status(413).json({ error: 'QR data is too large' });
+        }
+
+        const size = Math.min(1800, Math.max(96, Number.parseInt(String(req.query.size || '900'), 10) || 900));
+        const margin = Math.min(20, Math.max(0, Number.parseInt(String(req.query.margin || '8'), 10) || 8));
+        const ecc = String(req.query.ecc || 'H').trim().toUpperCase();
+        const pythonCmd = getCalibrationPythonCommand();
+        const script = [
+            'import io, sys',
+            'import qrcode',
+            'level = {"L": qrcode.constants.ERROR_CORRECT_L, "M": qrcode.constants.ERROR_CORRECT_M, "Q": qrcode.constants.ERROR_CORRECT_Q, "H": qrcode.constants.ERROR_CORRECT_H}.get(sys.argv[4], qrcode.constants.ERROR_CORRECT_H)',
+            'qr = qrcode.QRCode(error_correction=level, box_size=10, border=int(sys.argv[3]))',
+            'qr.add_data(sys.argv[1])',
+            'qr.make(fit=True)',
+            'img = qr.make_image(fill_color="black", back_color="white").convert("RGB")',
+            'target = int(sys.argv[2])',
+            'img = img.resize((target, target))',
+            'buf = io.BytesIO()',
+            'img.save(buf, format="PNG")',
+            'sys.stdout.buffer.write(buf.getvalue())'
+        ].join('; ');
+
+        const result = spawnSync(pythonCmd, ['-c', script, data, String(size), String(margin), ecc], {
+            cwd: runtimePaths.repoRoot,
+            encoding: null,
+            maxBuffer: 10 * 1024 * 1024
+        });
+
+        if (result.error || result.status !== 0) {
+            const detail = result.error?.message || Buffer.from(result.stderr || '').toString('utf8').trim() || 'QR generation failed';
+            return res.status(503).json({ error: detail });
+        }
+
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
+        return res.send(result.stdout);
+    } catch (error) {
+        return res.status(500).json({ error: error.message || 'QR generation failed' });
+    }
+});
+
 // Auth endpoints
 router.post('/register', async (req, res) => {
     try {
@@ -1942,7 +2013,7 @@ router.get('/system/info', async (req, res) => {
             url: `http://${preferredIp}:${port}`,
             localhostUrl: `http://localhost:${port}`,
             mode: uniqueIps.length > 0 ? 'local-network' : 'localhost-only',
-            offline: true
+            localNetwork: true
         });
     } catch (error) {
         sendDatabaseWriteError(res, error);
@@ -2064,7 +2135,8 @@ router.put('/records/:id', authenticateToken, async (req, res) => {
     try {
         const {
             studentName,
-            studentId,
+            sheetId,
+            sheet_id,
             course,
             subject,
             section,
@@ -2085,7 +2157,7 @@ router.put('/records/:id', authenticateToken, async (req, res) => {
         const result = await database.run(
             `UPDATE records SET 
                 student_name = ?, 
-                student_id = ?, 
+                sheet_id = ?, 
                 course = ?, 
                 subject = ?, 
                 section = ?, 
@@ -2104,7 +2176,7 @@ router.put('/records/:id', authenticateToken, async (req, res) => {
             WHERE id = ?`,
             [
                 studentName,
-                studentId,
+                sheetId || sheet_id || null,
                 course,
                 subject,
                 section,
@@ -2165,6 +2237,44 @@ router.post('/quizzes/:id/restore', authenticateToken, async (req, res) => {
     }
 });
 
+// Permanently delete an archived quiz and all related data (irreversible)
+router.delete('/quizzes/:id/permanent', authenticateToken, async (req, res) => {
+    try {
+        await database.assertWritable();
+        const id = req.params.id;
+
+        const quizRows = await database.query('SELECT id, archived FROM quizzes WHERE id = ?', [id]);
+        if (quizRows.length === 0) {
+            return res.status(404).json({ error: 'Quiz not found' });
+        }
+        if (Number(quizRows[0].archived) !== 1) {
+            return res.status(400).json({ error: 'Only archived answer keys can be permanently deleted' });
+        }
+
+        // Delete linked scans and their files/children first (FK-safe order)
+        const scanRows = await database.query(
+            'SELECT id, image_path, thumbnail_path FROM scans WHERE quiz_id = ?',
+            [id]
+        );
+        const deletedScans = await deleteScansAndRelated(scanRows);
+
+        // Records keep a quiz_id reference — delete them before the quiz
+        const recordsResult = await database.run('DELETE FROM records WHERE quiz_id = ?', [id]);
+
+        await database.run('DELETE FROM answer_keys WHERE quiz_id = ?', [id]);
+        await database.run('DELETE FROM quizzes WHERE id = ?', [id]);
+
+        res.json({
+            success: true,
+            deletedScans,
+            deletedRecords: recordsResult.changes,
+            message: 'Answer key permanently deleted.'
+        });
+    } catch (error) {
+        sendDatabaseWriteError(res, error);
+    }
+});
+
 // Answer Key endpoints
 router.get('/quizzes/:quizId/answer-key', authenticateToken, async (req, res) => {
     try {
@@ -2196,11 +2306,11 @@ router.post('/quizzes/:quizId/answer-key', authenticateToken, async (req, res) =
         await database.run('DELETE FROM answer_keys WHERE quiz_id = ?', [quizId]);
         
         const subjectBoundaries = {
-            MATH: { start: 1, end: 20 },
-            ENG: { start: 21, end: 40 },
-            SCI: { start: 41, end: 60 },
-            SOC: { start: 61, end: 80 },
-            FIL: { start: 81, end: 100 }
+            ENG: { start: 1, end: 20 },
+            SCI: { start: 21, end: 40 },
+            MATH: { start: 41, end: 60 },
+            GEN: { start: 61, end: 80 },
+            ABS: { start: 81, end: 100 }
         };
 
         for (let i = 0; i < normalizedAnswers.length; i++) {
@@ -2279,7 +2389,8 @@ router.get('/scans', authenticateToken, async (req, res) => {
         const params = [];
         // Excluding the ACTIVE_SCAN_RECORD_EXISTS_SQL filter (it references s.image_path which may not exist in older scans)
         // query += ACTIVE_SCAN_RECORD_EXISTS_SQL;
-        let countQuery = `SELECT COUNT(*) as total FROM scans s WHERE 1=1 ${ACTIVE_SCAN_RECORD_EXISTS_SQL}`;
+        // countQuery must mirror the main query so pagination.total matches the returned rows
+        let countQuery = `SELECT COUNT(*) as total FROM scans s WHERE 1=1`;
         const countParams = [];
 
         const addFilter = (sql, ...values) => {
@@ -2421,11 +2532,13 @@ router.get('/records', authenticateToken, async (req, res) => {
 
 router.post('/records', authenticateToken, async (req, res) => {
     try {
-        const { student_id, student_name, quiz_id, quiz_title, score, total_questions, percentage, entry_type, residency_type, special_equity_group, subject_code, answers } = req.body;
+        const { sheet_id, sheetId, student_name, quiz_id, quiz_title, score, total_questions, percentage, entry_type, residency_type, special_equity_group, subject_code, answers } = req.body;
+        const resolvedSheetId = String(sheet_id || sheetId || '').trim();
         const result = await database.run(
-            'INSERT INTO records (student_id, student_name, quiz_id, quiz_title, score, total_questions, percentage, entry_type, residency_type, special_equity_group, subject_code, answers) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO records (sheet_id, student_id, student_name, quiz_id, quiz_title, score, total_questions, percentage, entry_type, residency_type, special_equity_group, subject_code, answers) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
-                student_id || 'N/A',
+                resolvedSheetId || null,
+                '',
                 student_name || null,
                 quiz_id || null,
                 quiz_title || null,
@@ -2514,6 +2627,8 @@ router.post('/records/ocr', authenticateToken, async (req, res) => {
         const {
             quiz_id,
             student_name,
+            sheet_id,
+            sheetId,
             student_id: extStudentId,
             course,
             subject,
@@ -2593,17 +2708,60 @@ router.post('/records/ocr', authenticateToken, async (req, res) => {
 
         const status = percentage >= 75 ? 'PASS' : 'FAIL';
 
-        const resolvedRecordPaperId = String(extStudentId || '').trim() || generateShortOcrPaperId();
+        const submittedRecordPaperId = String(sheet_id || sheetId || extStudentId || '').trim();
+        const resolvedRecordPaperId = submittedRecordPaperId || generateShortOcrPaperId();
+        const normalizedQuizId = Number.parseInt(String(quiz_id || 0), 10) || 0;
+        const duplicateClauses = [];
+        const duplicateParams = [normalizedQuizId];
+
+        if (submittedRecordPaperId) {
+            duplicateClauses.push('sheet_id = ?');
+            duplicateParams.push(submittedRecordPaperId);
+        }
+        if (source_received_paper_id) {
+            duplicateClauses.push('source_received_paper_id = ?');
+            duplicateParams.push(source_received_paper_id);
+        }
+        if (finalImagePath) {
+            duplicateClauses.push('image_path = ?');
+            duplicateParams.push(finalImagePath);
+        }
+
+        if (duplicateClauses.length > 0) {
+            const duplicateRows = await database.query(
+                `SELECT id, sheet_id, student_name, quiz_id, timestamp
+                 FROM records
+                 WHERE COALESCE(quiz_id, 0) = ?
+                   AND (${duplicateClauses.join(' OR ')})
+                 ORDER BY timestamp DESC, id DESC
+                 LIMIT 1`,
+                duplicateParams
+            );
+
+            if (duplicateRows.length > 0) {
+                return res.status(409).json({
+                    success: false,
+                    code: 'DUPLICATE_RECORD',
+                    error: 'This paper has already been saved to records.',
+                    existingRecordId: duplicateRows[0].id,
+                    existingSheetId: duplicateRows[0].sheet_id || null,
+                    existingStudentName: duplicateRows[0].student_name || null,
+                    existingTimestamp: duplicateRows[0].timestamp || null
+                });
+            }
+        }
+
         const result = await database.run(
             `INSERT INTO records (
-                student_id, student_name, quiz_id, quiz_title, score, total_questions, percentage, status,
+                sheet_id, student_id, student_name, quiz_id, quiz_title, score, total_questions, percentage, status,
                 entry_type, residency_type, special_equity_group, exam_date_time, subject, section, course, age, room_no, seat_no, answers, raw_text, image_path,
                 source_received_paper_id, review_status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 resolvedRecordPaperId,
+                '',
                 String(student_name).trim(),
-                quiz_id || 0,
+                normalizedQuizId,
                 quizTitle,
                 score,
                 totalQuestions,
@@ -2632,7 +2790,7 @@ router.post('/records/ocr', authenticateToken, async (req, res) => {
             const numericPercentage = Number.parseFloat(String(percentage || 0)) || 0;
             const scanStatus = numericPercentage >= 75 ? 'PASS' : 'FAIL';
             const scanColumns = [
-                'student_id', 'student_name', 'quiz_id', 'answers',
+                'sheet_id', 'student_id', 'student_name', 'quiz_id', 'answers',
                 'score', 'total_score', 'total_questions', 'percentage', 'overall_percentage',
                 'status', 'overall_status',
                 // SUBJECT columns – added for OCR scans
@@ -2644,8 +2802,9 @@ router.post('/records/ocr', authenticateToken, async (req, res) => {
             ];
             const scanValues = [
                 resolvedRecordPaperId,
+                '',
                 String(student_name).trim(),
-                quiz_id || null,
+                normalizedQuizId || null,
                 JSON.stringify(answerArray),
                 score,
                 score,
@@ -2694,6 +2853,9 @@ router.get('/scores/report', authenticateToken, async (req, res) => {
     try {
         const { quizId, dateFrom, dateTo, entryType, equityGroup } = req.query;
         
+        // End-of-day handling so a date-only dateTo includes the whole day
+        const endOfDay = dateTo ? (dateTo.includes(' ') ? dateTo : `${dateTo} 23:59:59`) : '';
+        
         let query = `
             SELECT s.*, q.title as quiz_title, s.total_score as score 
             FROM scans s 
@@ -2703,42 +2865,50 @@ router.get('/scores/report', authenticateToken, async (req, res) => {
         const params = [];
         // Excluding the ACTIVE_SCAN_RECORD_EXISTS_SQL filter (it references s.image_path which may not exist in older scans)
         // query += ACTIVE_SCAN_RECORD_EXISTS_SQL;
-        if (quizId) {
-            query += ' AND s.quiz_id = ?';
-            params.push(quizId);
-        }
 
-        if (dateFrom) {
-            query += ' AND s.timestamp >= ?';
-            params.push(dateFrom);
+        const addFilter = (sql, ...values) => {
+            query += sql;
+            params.push(...values);
+        };
+
+        if (quizId) {
+            addFilter(' AND s.quiz_id = ?', quizId);
         }
-        if (dateTo) {
-            query += ' AND s.timestamp <= ?';
-            params.push(dateTo);
+        if (dateFrom) {
+            addFilter(' AND s.timestamp >= ?', dateFrom);
+        }
+        if (endOfDay) {
+            addFilter(' AND s.timestamp <= ?', endOfDay);
         }
         if (entryType) {
-            query += ' AND s.entry_type = ?';
-            params.push(entryType);
+            addFilter(' AND s.entry_type = ?', entryType);
         }
         if (equityGroup) {
-            query += ' AND s.special_equity_group = ?';
-            params.push(equityGroup);
+            addFilter(' AND s.special_equity_group = ?', equityGroup);
         }
         
         query += ' ORDER BY s.timestamp DESC';
         
         const scans = await database.query(query, params);
-        
-        // New student‑based pass‑rate calculation (Rule A)
+
+        // Student-based pass-rate calculation (Rule A), respecting the same filters
         const studentPassQuery = `
-            WITH student_pass AS (
+            WITH filtered_scans AS (
+                SELECT *
+                FROM scans s
+                WHERE 1=1
+                ${quizId ? 'AND s.quiz_id = ?' : ''}
+                ${dateFrom ? 'AND s.timestamp >= ?' : ''}
+                ${endOfDay ? 'AND s.timestamp <= ?' : ''}
+                ${entryType ? 'AND s.entry_type = ?' : ''}
+                ${equityGroup ? 'AND s.special_equity_group = ?' : ''}
+            ),
+            student_pass AS (
                 SELECT
-                    COALESCE(student_id, '') AS student_id,
+                    COALESCE(sheet_id, '') AS sheet_id,
                     MAX(CASE WHEN overall_status = 'PASS' THEN 1 ELSE 0 END) AS has_pass
-                FROM scans
-
-
-                GROUP BY COALESCE(student_id, '')
+                FROM filtered_scans
+                GROUP BY COALESCE(sheet_id, '')
             )
             SELECT
                 COUNT(*) AS totalStudents,
@@ -2746,11 +2916,22 @@ router.get('/scores/report', authenticateToken, async (req, res) => {
                 ROUND((SUM(has_pass) * 100.0) / COUNT(*), 1) AS studentPassRate
             FROM student_pass;
         `;
-        const [{ totalStudents, passingStudents, studentPassRate }] = await database.query(studentPassQuery);
+        const passParams = [];
+        if (quizId) passParams.push(quizId);
+        if (dateFrom) passParams.push(dateFrom);
+        if (endOfDay) passParams.push(endOfDay);
+        if (entryType) passParams.push(entryType);
+        if (equityGroup) passParams.push(equityGroup);
+        const [{ totalStudents, passingStudents, studentPassRate }] = await database.query(studentPassQuery, passParams);
         const total = totalStudents;
         const passing = passingStudents;
         const failing = total - passing;
         const passRate = studentPassRate;
+
+        // Average percentage across the filtered scans
+        const avgPercentage = scans.length > 0
+            ? Math.round((scans.reduce((sum, s) => sum + (Number(s.percentage) || 0), 0) / scans.length) * 10) / 10
+            : 0;
 
         
         res.json({
@@ -2762,7 +2943,8 @@ router.get('/scores/report', authenticateToken, async (req, res) => {
                 totalStudents: total,
                 passingStudents: passing,
                 failing,
-                studentPassRate: passRate
+                studentPassRate: passRate,
+                avgPercentage
             }
         });
     } catch (error) {
@@ -3329,6 +3511,13 @@ function buildIncompleteSubjectScores(totalQuestions = 100) {
 // New endpoint: Process image on server and create scan record
 router.post('/scans/process', async (req, res) => {
     try {
+        return res.status(410).json({
+            success: false,
+            scanMode: 'ai_vision',
+            code: 'LEGACY_OMR_RETIRED',
+            error: 'The legacy deterministic OMR scan endpoint has been retired. Use the AI Vision scan path.'
+        });
+
         const body = req.body || {};
         const photo = body.photo || body.image_data || body.image;
         const studentId = body.studentId || body.student_id || body.deviceId || body.device_id;
@@ -3378,7 +3567,7 @@ router.post('/scans/process', async (req, res) => {
             return res.status(400).json({ error: 'Valid image data is required' });
         }
 
-        console.log(`Processing scan for ${fallbackStudentName}, Student ID: ${studentId}, Quiz ID: ${quizId}, Questions: ${questionCount}`);
+        console.log(`Processing scan for ${fallbackStudentName}, Sheet ID: ${studentId}, Quiz ID: ${quizId}, Questions: ${questionCount}`);
 
         // Step 1: Extract image buffer from base64
         const matches = photo.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
@@ -3435,7 +3624,8 @@ router.post('/scans/process', async (req, res) => {
             rotation,
             debug: true,
             debugRatios: true,
-            threshold
+            threshold,
+            forensicDebug: Boolean(process.env.SCANCHECK_FORENSIC_DEBUG === '1' || req.body.forensicDebug)
         });
         if (!omrResult?.success) {
             const failureResponse = buildGeneratedLayoutFailureResponse(omrResult);
@@ -3589,11 +3779,11 @@ router.post('/scans/process', async (req, res) => {
                     ABS: subjectResults.ABS.score
                 }),
                 JSON.stringify({
-                    ENG: subjectResults.ENG.percentage,
-                    SCI: subjectResults.SCI.percentage,
-                    MATH: subjectResults.MATH.percentage,
-                    GEN: subjectResults.GEN.percentage,
-                    ABS: subjectResults.ABS.percentage
+                    ENG: subjectResults.ENG,
+                    SCI: subjectResults.SCI,
+                    MATH: subjectResults.MATH,
+                    GEN: subjectResults.GEN,
+                    ABS: subjectResults.ABS
                 }),
                 finalEntryType,
                 finalResidencyType,
@@ -3943,11 +4133,11 @@ router.post('/scans', async (req, res) => {
                 ABS: subjectResults.ABS.score
             }),
             JSON.stringify({
-                ENG: subjectResults.ENG.percentage,
-                SCI: subjectResults.SCI.percentage,
-                MATH: subjectResults.MATH.percentage,
-                GEN: subjectResults.GEN.percentage,
-                ABS: subjectResults.ABS.percentage
+                ENG: subjectResults.ENG,
+                SCI: subjectResults.SCI,
+                MATH: subjectResults.MATH,
+                GEN: subjectResults.GEN,
+                ABS: subjectResults.ABS
             }),
             entryType || null,
             specialEquityGroup || null
@@ -4059,6 +4249,496 @@ async function getCorrectAnswersForSubject(subjectCode) {
     }
 }
 
+function getAiOmrErrorStatus(error) {
+    const code = String(error?.code || '');
+    if (code === 'AI_OMR_DISABLED') return 403;
+    if (code === 'AI_OMR_MISSING_API_KEY' || code === 'AI_OMR_AUTH_FAILED') return 503;
+    if (code === 'AI_OMR_LAYOUT_IDENTIFICATION_FAILED' || code === 'AI_OMR_LAYOUT_NOT_FOUND') return 422;
+    if (code === 'AI_OMR_RATE_LIMITED') return 429;
+    if (code === 'AI_OMR_TIMEOUT' || code === 'AI_OMR_PROVIDER_UNAVAILABLE') return 504;
+    if (code === 'AI_OMR_INVALID_RESPONSE' || code === 'AI_OMR_MALFORMED_RESPONSE') return 502;
+    return 500;
+}
+
+function sanitizeAiOmrError(error) {
+    return {
+        success: false,
+        scanMode: 'ai_vision',
+        error: error?.message || 'AI scanner failed.',
+        code: error?.code || 'AI_OMR_ERROR',
+        details: Array.isArray(error?.details) ? error.details : undefined
+    };
+}
+
+router.get('/ai-omr/settings', authenticateToken, async (_req, res) => {
+    try {
+        const settings = loadAiOmrSettings(runtimePaths);
+        return res.json({
+            success: true,
+            settings: publicAiOmrSettings(settings)
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: error.message || 'Failed to load AI OMR settings'
+        });
+    }
+});
+
+router.post('/ai-omr/settings', authenticateToken, async (req, res) => {
+    try {
+        const settings = saveAiOmrSettings(req.body || {}, runtimePaths);
+        return res.json({
+            success: true,
+            settings: publicAiOmrSettings(settings)
+        });
+    } catch (error) {
+        return res.status(400).json({
+            success: false,
+            error: error.message || 'Failed to save AI OMR settings'
+        });
+    }
+});
+
+router.post('/ai-omr/test-connection', authenticateToken, async (req, res) => {
+    try {
+        const body = req.body || {};
+        const savedSettings = loadAiOmrSettings(runtimePaths);
+        const settings = {
+            ...savedSettings,
+            model: body.model ? String(body.model).trim() : savedSettings.model
+        };
+        const provider = new GeminiProvider(settings);
+        const result = await provider.testConnection();
+        return res.json({
+            success: true,
+            status: 'connected',
+            provider: 'gemini',
+            model: settings.model,
+            latencyMs: result.latencyMs || 0,
+            message: 'Connection successful.'
+        });
+    } catch (error) {
+        const status = getAiOmrErrorStatus(error);
+        return res.status(status).json({
+            success: false,
+            status: 'failed',
+            code: error?.code || 'AI_OMR_CONNECTION_FAILED',
+            error: 'Connection failed. Check the API key, billing, or model configuration.'
+        });
+    }
+});
+
+router.get('/ai-omr/usage', authenticateToken, async (_req, res) => {
+    try {
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const monthStart = new Date();
+        monthStart.setDate(1);
+        monthStart.setHours(0, 0, 0, 0);
+        const [today, thisMonth, allTime] = await Promise.all([
+            aiUsageAggregate('timestamp >= ?', [todayStart.toISOString()]),
+            aiUsageAggregate('timestamp >= ?', [monthStart.toISOString()]),
+            aiUsageAggregate('1=1')
+        ]);
+        return res.json({
+            success: true,
+            usage: {
+                today,
+                thisMonth,
+                allTime,
+                pricingAvailable: false
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: 'Could not load AI usage metrics.'
+        });
+    }
+});
+
+router.post('/ai-omr/identify-layout', authenticateToken, async (req, res) => {
+    try {
+        const body = req.body || {};
+        const imagePayload = body.image || body.photo || body.image_data;
+        if (!imagePayload) {
+            return res.status(400).json({
+                success: false,
+                code: 'AI_OMR_INVALID_IMAGE',
+                error: 'The uploaded image could not be processed.'
+            });
+        }
+        let imageBuffer;
+        try {
+            imageBuffer = readImagePayload(imagePayload);
+        } catch (_error) {
+            return res.status(400).json({
+                success: false,
+                code: 'AI_OMR_INVALID_IMAGE',
+                error: 'The uploaded image could not be processed.'
+            });
+        }
+        const questionCount = Number.parseInt(String(body.questionCount || body.question_count || 100), 10) || 100;
+        const layoutIdentity = await identifyLayoutForAiScan({
+            imageBuffer,
+            body,
+            questionCount,
+            subjects: body.subjects
+        });
+        if (!layoutIdentity.layoutId) {
+            return res.status(422).json({
+                success: false,
+                code: 'AI_OMR_LAYOUT_IDENTIFICATION_FAILED',
+                error: 'Could not identify sheet layout.',
+                barcodeStatus: layoutIdentity.qr?.status || 'qr_not_found',
+                requiresManualOverride: true
+            });
+        }
+        const summary = await quizSummaryForLayout(layoutIdentity.layoutId, body.quizId || body.quiz_id || null);
+        return res.json({
+            success: true,
+            layoutId: layoutIdentity.layoutId,
+            examId: layoutIdentity.layoutId,
+            quizId: summary.quizId,
+            examName: summary.examName,
+            questionCount: summary.questionCount || questionCount,
+            barcodeStatus: layoutIdentity.qr?.status || 'layout_supplied',
+            detectedFromQr: Boolean(layoutIdentity.qr?.success),
+            layoutSource: layoutIdentity.layoutSource || (layoutIdentity.qr?.success ? 'qr' : 'manual_or_selected_exam')
+        });
+    } catch (error) {
+        return res.status(400).json({
+            success: false,
+            code: 'AI_OMR_IDENTIFY_FAILED',
+            error: 'Could not identify sheet layout.'
+        });
+    }
+});
+
+async function loadGeneratedLayoutForAiScan(layoutId) {
+    const layoutPath = getLayoutPathForExamId(layoutId);
+    if (!layoutPath || !fs.existsSync(layoutPath)) {
+        return null;
+    }
+    return JSON.parse(fs.readFileSync(layoutPath, 'utf8'));
+}
+
+function normalizeLayoutSubjectConfig(subjects = []) {
+    if (!Array.isArray(subjects)) return [];
+    return subjects
+        .map((subject) => {
+            const questions = Array.isArray(subject?.questions)
+                ? subject.questions.length
+                : Number(subject?.questions || subject?.questionCount || subject?.question_count || 0);
+            return {
+                code: String(subject?.code || subject?.subjectCode || subject?.name || '').trim().toUpperCase(),
+                name: String(subject?.name || subject?.code || subject?.subjectCode || '').trim().toUpperCase(),
+                questions: Number(questions) || 0
+            };
+        })
+        .filter((subject) => subject.questions > 0);
+}
+
+function layoutSubjectConfig(layout = {}) {
+    if (Array.isArray(layout.subjectConfig)) return normalizeLayoutSubjectConfig(layout.subjectConfig);
+    if (Array.isArray(layout.subject_config)) return normalizeLayoutSubjectConfig(layout.subject_config);
+    if (Array.isArray(layout.subjects)) return normalizeLayoutSubjectConfig(layout.subjects);
+    return [];
+}
+
+function subjectConfigsMatch(a = [], b = []) {
+    const left = normalizeLayoutSubjectConfig(a);
+    const right = normalizeLayoutSubjectConfig(b);
+    if (left.length === 0 || right.length === 0 || left.length !== right.length) return false;
+    return left.every((subject, index) => {
+        const other = right[index];
+        return subject.questions === other.questions
+            && subject.code === other.code
+            && subject.name === other.name;
+    });
+}
+
+function layoutTotalQuestionCount(layout = {}) {
+    const fromSubjects = layoutSubjectConfig(layout).reduce((sum, subject) => sum + subject.questions, 0);
+    return Number(layout.questionCount || layout.question_count || fromSubjects || 0);
+}
+
+async function resolveGeneratedLayoutIdForSelectedQuiz(quizId, requestContext = {}) {
+    if (!quizId) return null;
+
+    let questionCount = Number(requestContext.questionCount) || 0;
+    let subjects = normalizeLayoutSubjectConfig(requestContext.subjects);
+    try {
+        const rows = await database.query('SELECT question_count, subject_config FROM quizzes WHERE id = ?', [quizId]);
+        const row = rows[0] || null;
+        questionCount = Number(row?.question_count) || questionCount;
+        const dbSubjects = normalizeLayoutSubjectConfig(parseSubjectConfigValue(row?.subject_config) || []);
+        if (dbSubjects.length > 0) subjects = dbSubjects;
+    } catch (error) {
+        console.warn('[AI OMR] Could not resolve quiz layout context:', error.message);
+    }
+
+    if (!questionCount || subjects.length === 0 || !fs.existsSync(runtimePaths.omrLayoutsDir)) return null;
+
+    const candidates = [];
+    for (const fileName of fs.readdirSync(runtimePaths.omrLayoutsDir)) {
+        if (!fileName.endsWith('.json')) continue;
+        const layoutPath = path.join(runtimePaths.omrLayoutsDir, fileName);
+        try {
+            const layout = JSON.parse(fs.readFileSync(layoutPath, 'utf8'));
+            if (layoutTotalQuestionCount(layout) !== questionCount) continue;
+            if (!subjectConfigsMatch(subjects, layoutSubjectConfig(layout))) continue;
+            const layoutId = String(layout.examId || layout.exam_id || path.basename(fileName, '.json')).trim();
+            if (!layoutId) continue;
+            const timestamp = Date.parse(layout.savedAt || layout.generatedAt || '') || fs.statSync(layoutPath).mtimeMs || 0;
+            candidates.push({ layoutId, timestamp });
+        } catch (_error) {
+            // Ignore malformed historical layout files.
+        }
+    }
+
+    candidates.sort((a, b) => b.timestamp - a.timestamp || a.layoutId.localeCompare(b.layoutId));
+    return candidates[0]?.layoutId || null;
+}
+
+async function identifyLayoutForAiScan({ imageBuffer, body = {}, questionCount, subjects }) {
+    const suppliedLayoutId = body.layoutId || body.layout_id || body.examId || body.exam_id || null;
+    const identity = await identifyLayout({ imageBuffer, suppliedLayoutId });
+    if (identity.layoutId) return identity;
+
+    const fallbackLayoutId = await resolveGeneratedLayoutIdForSelectedQuiz(body.quizId || body.quiz_id || null, {
+        questionCount,
+        subjects
+    });
+    if (!fallbackLayoutId) return identity;
+
+    return {
+        layoutId: fallbackLayoutId,
+        qr: {
+            ...(identity.qr || {}),
+            success: false,
+            status: 'qr_failed_layout_from_selected_exam',
+            barcodeData: null
+        },
+        layoutSource: 'selected_exam_latest_compatible_layout'
+    };
+}
+
+async function buildAiOmrScoring(scanResult, quizId) {
+    if (!quizId) {
+        return { scoringStatus: 'not_requested' };
+    }
+    const dbCorrectAnswers = await getCorrectAnswersForQuiz(quizId);
+    if (!Array.isArray(dbCorrectAnswers) || dbCorrectAnswers.length === 0) {
+        return {
+            scoringStatus: 'incomplete',
+            warning: SCORING_INCOMPLETE_WARNING
+        };
+    }
+    return {
+        scoringStatus: 'complete',
+        subjectResults: await calculateSubjectScores(scanResult.answers, quizId)
+    };
+}
+
+async function quizSummaryForLayout(layoutId, quizId = null) {
+    const layout = layoutId ? await loadGeneratedLayoutForAiScan(layoutId) : null;
+    const resolvedQuizId = quizId || layout?.quizId || layout?.quiz_id || null;
+    let quiz = null;
+    if (resolvedQuizId) {
+        const rows = await database.query('SELECT id, title, question_count, subject_config FROM quizzes WHERE id = ?', [resolvedQuizId]);
+        quiz = rows[0] || null;
+    }
+    const questionCount = Number(quiz?.question_count || layoutTotalQuestionCount(layout || {}) || layout?.questionCount || layout?.question_count || 0) || null;
+    return {
+        layout,
+        quizId: quiz?.id || resolvedQuizId || null,
+        examName: quiz?.title || layout?.title || layout?.examName || layout?.exam_name || layoutId || '',
+        questionCount
+    };
+}
+
+function aiOmrUsagePayload(scanResult = {}, extra = {}) {
+    const metrics = scanResult.metrics || {};
+    const usage = metrics.tokenUsage || {};
+    return {
+        requestId: scanResult.requestId || extra.requestId || null,
+        layoutId: scanResult.layoutId || extra.layoutId || null,
+        examId: extra.examId || scanResult.layoutId || null,
+        provider: scanResult.provider || extra.provider || 'gemini',
+        model: scanResult.model || extra.model || null,
+        strategy: scanResult.strategy || extra.strategy || null,
+        questionCount: Number(metrics.totalQuestions || extra.questionCount || 0) || null,
+        requestCount: Number(metrics.apiCallCount || extra.requestCount || 0) || null,
+        inputTokens: Number.isFinite(Number(usage.inputTokens)) ? Number(usage.inputTokens) : null,
+        outputTokens: Number.isFinite(Number(usage.outputTokens)) ? Number(usage.outputTokens) : null,
+        totalTokens: Number.isFinite(Number(usage.totalTokens)) ? Number(usage.totalTokens) : null,
+        processingTimeMs: Number(metrics.latencyMs || extra.processingTimeMs || 0) || null,
+        reviewCount: Array.isArray(scanResult.needsReview) ? scanResult.needsReview.length : Number(extra.reviewCount || 0),
+        success: scanResult.success !== false,
+        errorCode: extra.errorCode || null
+    };
+}
+
+async function recordAiOmrUsage(usage = {}) {
+    try {
+        await database.run(
+            `INSERT INTO ai_omr_usage (
+                request_id, layout_id, exam_id, provider, model, strategy,
+                question_count, request_count, input_tokens, output_tokens, total_tokens,
+                processing_time_ms, review_count, success, error_code
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                usage.requestId || null,
+                usage.layoutId || null,
+                usage.examId || null,
+                usage.provider || null,
+                usage.model || null,
+                usage.strategy || null,
+                usage.questionCount || null,
+                usage.requestCount || null,
+                usage.inputTokens,
+                usage.outputTokens,
+                usage.totalTokens,
+                usage.processingTimeMs || null,
+                usage.reviewCount || 0,
+                usage.success ? 1 : 0,
+                usage.errorCode || null
+            ]
+        );
+    } catch (error) {
+        console.warn('[AI Usage] Could not record usage:', error.message);
+    }
+}
+
+async function aiUsageAggregate(whereSql, params = []) {
+    const rows = await database.query(
+        `SELECT
+            COUNT(*) AS papers,
+            COALESCE(SUM(request_count), 0) AS requests,
+            COALESCE(SUM(input_tokens), 0) AS inputTokens,
+            COALESCE(SUM(output_tokens), 0) AS outputTokens,
+            COALESCE(SUM(total_tokens), 0) AS totalTokens,
+            COALESCE(AVG(processing_time_ms), 0) AS averageProcessingMs,
+            COALESCE(AVG(request_count), 0) AS averageRequests
+         FROM ai_omr_usage
+         WHERE ${whereSql}`,
+        params
+    );
+    const row = rows[0] || {};
+    return {
+        papers: Number(row.papers || 0),
+        requests: Number(row.requests || 0),
+        inputTokens: Number(row.inputTokens || 0),
+        outputTokens: Number(row.outputTokens || 0),
+        totalTokens: Number(row.totalTokens || 0),
+        averageProcessingMs: Math.round(Number(row.averageProcessingMs || 0)),
+        averageRequests: Math.round(Number(row.averageRequests || 0) * 10) / 10
+    };
+}
+
+// AI Vision OMR endpoint. This does not call the legacy contour answer classifier.
+router.post('/ai-omr/scan', authenticateToken, async (req, res) => {
+    try {
+        const body = req.body || {};
+        const imagePayload = body.image || body.photo || body.image_data;
+        if (!imagePayload) {
+            return res.status(400).json({
+                success: false,
+                scanMode: 'ai_vision',
+                error: 'Image data is required.',
+                code: 'AI_OMR_INVALID_IMAGE'
+            });
+        }
+
+        const imageBuffer = readImagePayload(imagePayload);
+        const mimeType = inferImageMimeType(imagePayload);
+        const layoutIdentity = await identifyLayoutForAiScan({
+            imageBuffer,
+            body,
+            questionCount: body.questionCount || body.question_count,
+            subjects: body.subjects
+        });
+        if (!layoutIdentity.layoutId) {
+            return res.status(422).json({
+                success: false,
+                scanMode: 'ai_vision',
+                error: 'Layout identification failed. QR could not be decoded and no layoutId was supplied.',
+                code: 'AI_OMR_LAYOUT_IDENTIFICATION_FAILED',
+                barcodeStatus: layoutIdentity.qr?.status || 'qr_not_found'
+            });
+        }
+
+        const layout = await loadGeneratedLayoutForAiScan(layoutIdentity.layoutId);
+        if (!layout) {
+            return res.status(404).json({
+                success: false,
+                scanMode: 'ai_vision',
+                error: 'Generated layout was not found.',
+                code: 'AI_OMR_LAYOUT_NOT_FOUND',
+                layoutId: layoutIdentity.layoutId
+            });
+        }
+
+        const baseOptions = {
+            imageBuffer,
+            mimeType,
+            layout,
+            layoutId: layoutIdentity.layoutId,
+            requestId: body.requestId || body.request_id || null,
+            strategy: body.strategy || undefined,
+            verifyLowConfidence: Boolean(body.verifyLowConfidence || body.verify_low_confidence),
+            groundTruthAnswers: body.groundTruthAnswers || body.ground_truth_answers || null,
+            runtimePaths,
+            config: loadAiOmrSettings(runtimePaths)
+        };
+
+        if (body.benchmark === true) {
+            const benchmark = await runAiOmrBenchmark({
+                ...baseOptions,
+                repeat: Math.max(1, Math.min(3, Number(body.repeat) || 3))
+            });
+            return res.json({
+                success: true,
+                scanMode: 'ai_vision',
+                provider: benchmark.runs[0]?.provider || 'gemini',
+                model: benchmark.runs[0]?.model || process.env.AI_OMR_MODEL || 'gemini-3.6-flash',
+                layoutId: layoutIdentity.layoutId,
+                benchmark
+            });
+        }
+
+        const scanResult = await runAiOmrScan(baseOptions);
+        await recordAiOmrUsage(aiOmrUsagePayload(scanResult, {
+            examId: layoutIdentity.layoutId,
+            questionCount: layoutTotalQuestionCount(layout || {})
+        }));
+        const scoring = await buildAiOmrScoring(scanResult, body.quizId || body.quiz_id || null);
+        return res.json({
+            ...scanResult,
+            scoringStatus: scoring.scoringStatus,
+            scoringWarning: scoring.warning || null,
+            subjectResults: scoring.subjectResults || null
+        });
+    } catch (error) {
+        const status = getAiOmrErrorStatus(error);
+        await recordAiOmrUsage({
+            requestId: req.body?.requestId || req.body?.request_id || null,
+            layoutId: req.body?.layoutId || req.body?.layout_id || null,
+            examId: req.body?.examId || req.body?.exam_id || null,
+            provider: 'gemini',
+            model: loadAiOmrSettings(runtimePaths).model,
+            success: false,
+            errorCode: error?.code || 'AI_OMR_ERROR'
+        });
+        if (status >= 500) {
+            console.warn('[AI OMR] Scan failed:', error?.code || error?.message || error);
+        }
+        return res.status(status).json(sanitizeAiOmrError(error));
+    }
+});
+
 // OMR Extraction Endpoint
 router.post('/omr/layouts', authenticateToken, async (req, res) => {
     try {
@@ -4118,6 +4798,12 @@ router.get('/omr/layouts/:examId', authenticateToken, async (req, res) => {
 
 router.post('/omr/debug-bubbles', authenticateToken, async (req, res) => {
     try {
+        return res.status(410).json({
+            success: false,
+            code: 'LEGACY_OMR_DEBUG_RETIRED',
+            error: 'Legacy bubble debug scanning has been retired from the product path.'
+        });
+
         const imagePayload = req.body?.image || req.body?.photo || req.body?.image_data;
         const examId = req.body?.examId || req.body?.exam_id || null;
         const imageBuffer = readImagePayload(imagePayload);
@@ -4145,7 +4831,7 @@ router.post('/omr/debug-bubbles', authenticateToken, async (req, res) => {
     }
 });
 
-// OMR Extraction Endpoint
+// AI Vision extraction endpoint
 router.post('/ocr', authenticateToken, async (req, res) => {
     try {
         const requestId = crypto.randomUUID();
@@ -4170,7 +4856,7 @@ router.post('/ocr', authenticateToken, async (req, res) => {
         const sheetFormat = normalizeSheetFormat(req.body.sheetFormat);
         if (!photo) return res.status(400).json({ error: 'Image data is required' });
 
-        console.log(`Starting OMR extraction (rotation: ${rotation}, sheet format: ${sheetFormat})...`);
+        console.log(`Starting AI Vision extraction (rotation: ${rotation}, sheet format: ${sheetFormat})...`);
 
         // Extract image buffer from base64 or file path
         let imageBuffer;
@@ -4202,11 +4888,11 @@ router.post('/ocr', authenticateToken, async (req, res) => {
             }
         }
 
-        // Compute image hash from the actual buffer sent to layout worker
+        // Compute image hash from the actual buffer sent to AI Vision.
         const imageHash = crypto.createHash('sha256').update(imageBuffer).digest('hex');
         console.log(`[ocr] requestId=${requestId} imageHash=${imageHash.slice(0, 12)} size=${imageBuffer.length} examId=${req.body.quizId || '?'} sheetFormat=${sheetFormat}`);
 
-        // Run generated-layout OMR only.
+        // Run AI Vision answer reading only.
         let omrResult;
         let questionCount = Number.parseInt(String(req.body.questionCount || req.body.question_count || 100), 10) || 100;
         let effectiveSubjects = Array.isArray(requestedSubjects) && requestedSubjects.length > 0
@@ -4227,6 +4913,259 @@ router.post('/ocr', authenticateToken, async (req, res) => {
             }
         }
         questionCount = Math.min(100, Math.max(1, Number(questionCount) || 100));
+
+        const aiSettings = {
+            ...loadAiOmrSettings(runtimePaths),
+            enabled: true
+        };
+        if (aiSettings.enabled) {
+            const layoutIdentity = await identifyLayoutForAiScan({
+                imageBuffer,
+                body: req.body || {},
+                questionCount,
+                subjects: effectiveSubjects
+            });
+            if (!layoutIdentity.layoutId) {
+                return res.status(422).json({
+                    success: false,
+                    scanMode: 'ai_vision',
+                    layoutFound: false,
+                    requiresLayout: true,
+                    error: 'Layout identification failed. QR could not be decoded and no layoutId was supplied.'
+                });
+            }
+
+            const layout = await loadGeneratedLayoutForAiScan(layoutIdentity.layoutId);
+            if (!layout) {
+                return res.status(404).json({
+                    success: false,
+                    scanMode: 'ai_vision',
+                    layoutFound: false,
+                    requiresLayout: true,
+                    layoutId: layoutIdentity.layoutId,
+                    examId: layoutIdentity.layoutId,
+                    error: 'Generated layout was not found.'
+                });
+            }
+
+            let aiResult;
+            try {
+                aiResult = await runAiOmrScan({
+                    imageBuffer,
+                    mimeType: inferImageMimeType(photo),
+                    layout,
+                    layoutId: layoutIdentity.layoutId,
+                    requestId,
+                    strategy: aiSettings.sectionSize === 10 ? 'section_10' : 'section_20',
+                    verifyLowConfidence: true,
+                    runtimePaths,
+                    config: aiSettings
+                });
+            } catch (aiError) {
+                const status = getAiOmrErrorStatus(aiError);
+                await recordAiOmrUsage({
+                    requestId,
+                    layoutId: layoutIdentity.layoutId,
+                    examId: layoutIdentity.layoutId,
+                    provider: 'gemini',
+                    model: aiSettings.model,
+                    strategy: aiSettings.strategy,
+                    questionCount,
+                    success: false,
+                    errorCode: aiError?.code || 'AI_OMR_ERROR'
+                });
+                if (aiError?.details) {
+                    console.warn('[AI OMR] Failure details:', JSON.stringify(aiError.details).slice(0, 1600));
+                }
+                return res.status(status).json(sanitizeAiOmrError(aiError));
+            }
+            const workerFinishedAt = new Date().toISOString();
+
+            const barcodeData = normalizeQrIdentityData(
+                layoutIdentity.qr?.barcodeData
+                || aiResult.barcodeData
+                || {}
+            );
+            const qrStudentMetadata = await resolveStudentMetadataFromQr(barcodeData, quizId);
+            const resolvedStudentName = firstNonPlaceholderName(
+                manualName,
+                qrStudentMetadata.studentName,
+                barcodeData.studentName
+            ) || '';
+            const resolvedSheetId = firstNonEmptyText(
+                barcodeData.sheetId,
+                barcodeData.sheet_id,
+                qrStudentMetadata.sheetId
+            );
+            const resolvedCourse = cleanExtractedField(
+                manualCourse || qrStudentMetadata.course || barcodeData.course || '',
+                'course'
+            );
+            const resolvedAge = firstNonEmptyText(manualAge, qrStudentMetadata.age, barcodeData.age);
+            const resolvedRoomNo = firstNonEmptyText(manualRoom, qrStudentMetadata.roomNo, barcodeData.roomNo, barcodeData.room_no);
+            const resolvedSeatNo = firstNonEmptyText(manualSeat, qrStudentMetadata.seatNo, barcodeData.seatNo, barcodeData.seat_no);
+            const resolvedDateTime = barcodeData.dateTime || barcodeData.date_time || qrStudentMetadata.dateTime || '';
+            const topFields = aiResult.topFields || {};
+            const topFieldValue = (fieldName) => {
+                const field = topFields[fieldName] || {};
+                const value = String(field.value || '').trim();
+                const state = String(field.state || '').trim().toLowerCase();
+                if (value) return value;
+                if (state === 'multiple') return 'Multiple';
+                if (state === 'uncertain') return 'Uncertain';
+                if (fieldName === 'equityGroup' && state === 'blank') return 'None';
+                return '';
+            };
+            const resolvedSex = firstNonEmptyText(
+                barcodeData.sex,
+                barcodeData.gender,
+                topFieldValue('sex')
+            );
+            const resolvedEntryType = firstNonEmptyText(
+                manualEntry,
+                barcodeData.entryType,
+                barcodeData.entry_type,
+                topFieldValue('studentType')
+            );
+            const resolvedResidencyType = firstNonEmptyText(
+                manualResidency,
+                barcodeData.residencyType,
+                barcodeData.residency_type,
+                topFieldValue('residencyType')
+            );
+            const resolvedEquityGroup = firstNonEmptyText(
+                manualEquity,
+                barcodeData.equityGroup,
+                barcodeData.equity_group,
+                topFieldValue('equityGroup')
+            );
+
+            let score = 0;
+            let correctAnswers = [];
+            let scoringStatus = quizId ? 'complete' : 'not_requested';
+            if (quizId) {
+                correctAnswers = await getCorrectAnswersForQuiz(quizId);
+                if (correctAnswers && correctAnswers.length > 0) {
+                    for (let i = 0; i < Math.min(aiResult.answers.length, correctAnswers.length); i++) {
+                        const studentAns = String(aiResult.answers[i] || '').trim().toUpperCase();
+                        const correctAns = String(correctAnswers[i] || '').trim().toUpperCase();
+                        if (studentAns && correctAns && studentAns === correctAns) {
+                            score++;
+                        }
+                    }
+                } else {
+                    correctAnswers = [];
+                    scoringStatus = 'incomplete';
+                }
+            } else {
+                score = aiResult.answers.filter(Boolean).length;
+            }
+
+            const stateCounts = aiResult.metrics?.stateCounts || {};
+            const selectedCount = Number(stateCounts.selected || 0);
+            const returnedCount = Number(aiResult.metrics?.returnedQuestions || aiResult.questions?.length || 0);
+            const confidence = returnedCount > 0 ? selectedCount / returnedCount : 0;
+            const mappedBubbleCount = returnedCount - Number(stateCounts.uncertain || 0);
+            await recordAiOmrUsage(aiOmrUsagePayload(aiResult, {
+                examId: layoutIdentity.layoutId,
+                questionCount
+            }));
+
+            return res.json({
+                success: true,
+                requestId,
+                imageHash,
+                imageSizeBytes: imageBuffer.length,
+                workerStartedAt,
+                workerFinishedAt,
+                source: 'ai_vision_scan',
+                cacheHit: false,
+                studentName: resolvedStudentName,
+                sheetId: resolvedSheetId,
+                sheet_id: resolvedSheetId,
+                studentId: null,
+                course: resolvedCourse,
+                age: resolvedAge,
+                roomNo: resolvedRoomNo,
+                seatNo: resolvedSeatNo,
+                dateTime: resolvedDateTime,
+                sex: resolvedSex,
+                entryType: resolvedEntryType,
+                residencyType: resolvedResidencyType,
+                equityGroup: resolvedEquityGroup,
+                entryGroup: {
+                    studentType: resolvedEntryType,
+                    residencyType: resolvedResidencyType,
+                    fields: topFields
+                },
+                equityGroupResult: {
+                    value: resolvedEquityGroup || 'None',
+                    values: resolvedEquityGroup && !['None', 'Multiple', 'Uncertain'].includes(resolvedEquityGroup) ? [resolvedEquityGroup] : [],
+                    state: topFields.equityGroup?.state || null,
+                    fields: topFields
+                },
+                topFields,
+                classificationFields: topFields,
+                barcodeData,
+                barcodeStatus: layoutIdentity.qr?.status || aiResult.barcodeStatus || 'qr_success',
+                proctorStatus: 'Not Verified',
+                answers: aiResult.answers,
+                correctAnswers,
+                score,
+                scoringStatus,
+                confidence,
+                overallConfidence: confidence,
+                detectionCoverage: confidence,
+                scanQualityConfidence: confidence,
+                alignmentConfidence: null,
+                templateMetrics: aiResult.metrics,
+                questionMetrics: aiResult.questions || [],
+                aiInputPreview: aiResult.metrics?.aiInputPreview || null,
+                provider: aiResult.provider || 'gemini',
+                model: aiResult.model || null,
+                strategy: aiResult.strategy || null,
+                imageDetail: aiResult.imageDetail || null,
+                verificationMode: aiResult.verificationMode || null,
+                promptVersion: aiResult.promptVersion || null,
+                activeQuestionNumbers: (aiResult.questions || []).map((question) => question.question),
+                activeQuestionCount: returnedCount,
+                totalTemplateQuestions: questionCount,
+                omrEngineUsed: 'gemini_vision',
+                scanMode: 'ai_vision',
+                layoutFound: true,
+                layoutId: aiResult.layoutId,
+                examId: aiResult.layoutId,
+                workerUsed: 'gemini_vision',
+                layoutBubbleCount: questionCount * 4,
+                evaluatedBubbleCount: questionCount * 4,
+                detectedAnswerCount: selectedCount,
+                detectedBubbleCount: selectedCount,
+                mappedBubbleCount,
+                mappingConfidence: confidence,
+                reviewStatus: aiResult.status === 'REVIEW' ? 'needs_review' : 'auto_scanned',
+                needsReview: Array.isArray(aiResult.needsReview) ? aiResult.needsReview : [],
+                needsReviewCount: Array.isArray(aiResult.needsReview) ? aiResult.needsReview.length : 0,
+                warnings: scoringStatus === 'incomplete' ? [SCORING_INCOMPLETE_WARNING] : [],
+                rawText: '',
+                extractedDate: '',
+                fieldConfidence: {},
+                fieldDebug: null,
+                ocrEngine: 'ai_vision',
+                imagePath: typeof photo === 'string' && !photo.startsWith('data:image/') ? photo : null,
+                debugImagePath: null,
+                sourceReceivedPaperId: sourceReceivedPaperId || null,
+                studentLookupSource: qrStudentMetadata.source || null,
+                quizId,
+                message: 'AI Vision scan completed successfully'
+            });
+        }
+
+        return res.status(503).json({
+            success: false,
+            scanMode: 'ai_vision',
+            code: 'AI_OMR_REQUIRED',
+            error: 'AI Vision scanner is required and no legacy scanner fallback is available.'
+        });
         
         omrResult = await runGeneratedLayoutOmr(imageBuffer, {
             rotation,
@@ -4234,7 +5173,10 @@ router.post('/ocr', authenticateToken, async (req, res) => {
             debugProblemQuestions: true,
             debugRatios: true,
             threshold,
-            requestId
+            requestId,
+            scanId: req.body.scanId,
+            scanFile: req.body.imageFileName || req.body.filename || null,
+            forensicDebug: Boolean(process.env.SCANCHECK_FORENSIC_DEBUG === '1' || req.body.forensicDebug)
         });
         const workerFinishedAt = new Date().toISOString();
         if (!omrResult?.success) {
@@ -4429,7 +5371,7 @@ router.post('/ocr', authenticateToken, async (req, res) => {
         });
 
     } catch (error) {
-        console.error('OMR Processing Error:', error);
+        console.error('AI Vision Processing Error:', error);
         res.status(500).json({ error: error.message });
     }
 });

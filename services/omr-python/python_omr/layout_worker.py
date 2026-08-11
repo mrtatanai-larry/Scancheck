@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import time
+import hashlib
 from pathlib import Path
 
 import cv2
@@ -27,6 +28,13 @@ try:
 except Exception:
     HAS_CNN_CLASSIFIER = False
 
+# Optional: forensic per-scan trace bundle
+try:
+    from forensic_debug import ForensicDebug
+    HAS_FORENSIC_DEBUG = True
+except ImportError:
+    HAS_FORENSIC_DEBUG = False
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RUNTIME_ROOT = Path(os.getenv("SCANCHECK_RUNTIME_ROOT", REPO_ROOT / ".runtime"))
@@ -35,6 +43,7 @@ if not RUNTIME_ROOT.is_absolute():
 
 DEBUG_DIR = Path(os.getenv("SCANCHECK_UPLOADS_DEBUG_DIR", RUNTIME_ROOT / "data" / "uploads" / "debug"))
 LAYOUT_DIR = Path(os.getenv("SCANCHECK_OMR_LAYOUT_DIR", RUNTIME_ROOT / "data" / "omr-layouts"))
+OMR_DEBUG_DIR = Path(os.getenv("SCANCHECK_OMR_DEBUG_DIR", RUNTIME_ROOT / "data" / "omr-debug"))
 
 SEARCH_PATTERN = [
     (0, 0), (-2, -2), (2, -2), (-2, 2), (2, 2),
@@ -597,6 +606,7 @@ def detect_filled_bubble_contours(image):
             continue
 
         circles.append({
+            "contourId": len(circles),
             "x": int(round(cx)),
             "y": int(round(cy)),
             "radius": int(round(radius)),
@@ -604,6 +614,8 @@ def detect_filled_bubble_contours(image):
             "confidence": round(float(confidence), 4),
             "area": round(area, 2),
             "circularity": round(float(circularity), 4),
+            "occupancy": round(float(occupancy), 4),
+            "aspect": round(float(aspect_ratio), 4),
         })
 
     # Optional: run CNN classifier on each detected bubble for refined scoring
@@ -899,7 +911,7 @@ def _roi_fill_classifier(gray, choices, fallback_H=None, fill_threshold=0.38, di
 PROBLEM_QUESTIONS = {84, 86, 87, 90, 91}
 
 
-def classify_detected_answers(bubbles, layout, gray=None, fallback_H=None, fallback_threshold=0.38, debug_dir=None, request_id="", debug_ratios=False):
+def classify_detected_answers(bubbles, layout, gray=None, fallback_H=None, fallback_threshold=0.38, debug_dir=None, request_id="", debug_ratios=False, forensic=None):
     answers = []
     answers_by_subject = {}
     question_metrics = []
@@ -1181,7 +1193,9 @@ def classify_detected_answers(bubbles, layout, gray=None, fallback_H=None, fallb
                 last_metric["lowConfidence"] = margin_val < 0.08
 
             # --- Crop-image saving for PROBLEM_QUESTIONS only ---
-            q_num = int(question.get("number") or flat_q_no)
+            # question.number is LOCAL (1-20 per subject); PROBLEM_QUESTIONS is
+            # expressed in flat/global numbering (1-100), so use flat_q_no here.
+            q_num = flat_q_no
             if gray is not None and debug_dir and q_num in PROBLEM_QUESTIONS:
                 roi_info = {}
                 for ch in choices:
@@ -1250,6 +1264,44 @@ def classify_detected_answers(bubbles, layout, gray=None, fallback_H=None, fallb
                 }
                 sys.stderr.write(json.dumps(override_info) + "\n")
 
+            # --- Forensic trace record (observational only) ---
+            if forensic is not None:
+                if roi_override:
+                    detection_source = "roi_fill"
+                elif used_fallback:
+                    detection_source = "fallback_sampled"
+                elif state == "detected":
+                    detection_source = "contour"
+                else:
+                    detection_source = state
+                forensic.add_question_record({
+                    "globalNo": flat_q_no,
+                    "subject": subject_code,
+                    "subjectName": subject_name,
+                    "localNo": q_no,
+                    "rowY": entry["rowY"],
+                    "rowLeft": entry["rowLeft"],
+                    "rowRight": entry["rowRight"],
+                    "rowTop": entry["rowTop"],
+                    "rowBottom": entry["rowBottom"],
+                    "rowYTol": entry["rowYTol"],
+                    "laneTol": entry["laneTol"],
+                    "crossTol": entry["crossTol"],
+                    "orientation": entry["orientation"],
+                    "state": state,
+                    "answer": answer,
+                    "displayAnswer": display_answer,
+                    "detectionSource": detection_source,
+                    "confidence": confidence,
+                    "choices": choices,
+                    "subjectBubbles": subject_bubbles,
+                    "assigned": assigned_by_question.get(flat_q_no) or [],
+                    "bestByChoice": best_by_choice,
+                    "fallbackScores": fallback_scores,
+                    "roiRatios": roi_ratios,
+                    "roiOverride": roi_override,
+                })
+
     return answers, answers_by_subject, question_metrics, mapped_bubbles
 
 
@@ -1307,7 +1359,7 @@ def classify_entry_group(bubbles, choices, debug_dir=None):
     }
 
 
-def classify_contour_omr(bubbles, layout, gray=None, fallback_H=None, fallback_threshold=0.38, debug_dir=None, request_id="", debug_ratios=False):
+def classify_contour_omr(bubbles, layout, gray=None, fallback_H=None, fallback_threshold=0.38, debug_dir=None, request_id="", debug_ratios=False, forensic=None):
     entry_result = classify_entry_group(
         bubbles,
         layout.get("entryGroup") or layout.get("entry_group") or {},
@@ -1343,6 +1395,7 @@ def classify_contour_omr(bubbles, layout, gray=None, fallback_H=None, fallback_t
         debug_dir=debug_dir,
         request_id=request_id,
         debug_ratios=debug_ratios,
+        forensic=forensic,
     )
 
     mapped_bubbles = []
@@ -2218,29 +2271,37 @@ def _detect_registration_anchor_transform(gray, layout):
 
         _, dark = cv2.threshold(roi, 140, 255, cv2.THRESH_BINARY_INV)
         dark = cv2.morphologyEx(dark, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
-        contours, _ = cv2.findContours(dark, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
+        # A registration square printed flush against a grid line can merge
+        # with that line into a single tall/thin contour and fail the aspect
+        # check.  Erode at several levels to break thin attachments (grid
+        # lines are ~2-3 px) while leaving the ~21 px square intact, then
+        # pick the best square candidate across all levels.
         best = None
         best_score = float("inf")
-        for contour in contours:
-            area = float(cv2.contourArea(contour))
-            if area < max(20.0, radius * radius * 0.5) or area > max(900.0, radius * radius * 10.0):
-                continue
-            bx, by, bw, bh = cv2.boundingRect(contour)
-            if bw <= 0 or bh <= 0:
-                continue
-            aspect = bw / float(bh)
-            if aspect < 0.55 or aspect > 1.85:
-                continue
-            if bw > search * 1.5 or bh > search * 1.5:
-                continue
-            cx = x1 + bx + bw / 2.0
-            cy = y1 + by + bh / 2.0
-            dist = math.hypot(cx - ex, cy - ey)
-            score = dist + abs(bw - bh) * 0.4
-            if score < best_score:
-                best_score = score
-                best = (cx, cy, area, bw, bh, dist)
+        kernel3 = np.ones((3, 3), np.uint8)
+        for erode_iters in range(5):
+            level = dark if erode_iters == 0 else cv2.erode(dark, kernel3, iterations=erode_iters)
+            contours, _ = cv2.findContours(level, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for contour in contours:
+                area = float(cv2.contourArea(contour))
+                if area < max(20.0, radius * radius * 0.5) or area > max(900.0, radius * radius * 10.0):
+                    continue
+                bx, by, bw, bh = cv2.boundingRect(contour)
+                if bw <= 0 or bh <= 0:
+                    continue
+                aspect = bw / float(bh)
+                if aspect < 0.55 or aspect > 1.85:
+                    continue
+                if bw > search * 1.5 or bh > search * 1.5:
+                    continue
+                cx = x1 + bx + bw / 2.0
+                cy = y1 + by + bh / 2.0
+                dist = math.hypot(cx - ex, cy - ey)
+                score = dist + abs(bw - bh) * 0.4
+                if score < best_score:
+                    best_score = score
+                    best = (cx, cy, area, bw, bh, dist)
 
         if best is None:
             continue
@@ -2271,6 +2332,7 @@ def _detect_registration_anchor_transform(gray, layout):
     dst = np.array(expected, dtype=np.float32)
 
     H = None
+    mask = None
     method = "homography"
     if len(detected) >= 4:
         H, mask = cv2.findHomography(src, dst, cv2.RANSAC, 4.0)
@@ -2293,7 +2355,13 @@ def _detect_registration_anchor_transform(gray, layout):
     projected = cv2.perspectiveTransform(src.reshape(-1, 1, 2), H).reshape(-1, 2)
     errors = np.linalg.norm(projected - dst, axis=1)
     mean_error = float(np.mean(errors)) if len(errors) else 999.0
-    confidence = max(0.0, min(1.0, 1.0 - mean_error / 12.0))
+    inlier_fraction = 1.0
+    if len(detected) >= 4 and mask is not None:
+        inlier_idx = np.where(mask.ravel() == 1)[0]
+        if len(inlier_idx) >= 3:
+            mean_error = float(np.mean(errors[inlier_idx]))
+            inlier_fraction = len(inlier_idx) / float(len(detected))
+    confidence = max(0.0, min(1.0, (1.0 - mean_error / 12.0) * (0.4 + 0.6 * inlier_fraction)))
 
     return H, {
         "active": True,
@@ -2302,6 +2370,7 @@ def _detect_registration_anchor_transform(gray, layout):
         "anchorCount": len(anchors),
         "detectedCount": len(detected),
         "meanError": round(mean_error, 2),
+        "inlierFraction": round(inlier_fraction, 3),
         "confidence": round(confidence, 3),
         "anchors": details,
     }
@@ -2343,6 +2412,10 @@ def main():
     debug_problem_questions = options.get("debugProblemQuestions", False)
     problem_debug_dir = debug_dir if debug_problem_questions else None
     debug_ratios = options.get("debugRatios", False) or debug_problem_questions or options.get("debug", False)
+    forensic_debug_enabled = bool(
+        options.get("forensicDebug", False)
+        or str(os.getenv("SCANCHECK_FORENSIC_DEBUG", "")).lower() in ("1", "true", "yes")
+    )
     use_cnn = options.get("useCnn", HAS_CNN_CLASSIFIER)
 
     image_bytes = sys.stdin.buffer.read()
@@ -2459,9 +2532,38 @@ def main():
     if width <= 0 or height <= 0:
         raise RuntimeError("Layout sheetSize.width and sheetSize.height are required.")
 
+    # --- Forensic debug session (observational only) ---
+    forensic = None
+    if forensic_debug_enabled:
+        try:
+            from forensic_debug import ForensicDebug
+        except Exception as exc:
+            sys.stderr.write(f"layout_worker forensic: import failed ({exc}); disabling\n")
+            ForensicDebug = None
+        if ForensicDebug is not None:
+            scan_id = slug_id(options.get("scanId") or request_id) or (
+                "scan_%s_%d" % (layout_id, int(time.time() * 1000))
+            )
+            forensic = ForensicDebug(
+                scan_id=scan_id,
+                request_id=request_id,
+                layout_id=layout_id,
+                bundle_root=OMR_DEBUG_DIR,
+            )
+            forensic.begin()
+            forensic.record_input(
+                file=options.get("scanFile") or "stdin.jpg",
+                width=int(image.shape[1]),
+                height=int(image.shape[0]),
+                sha256=hashlib.sha256(image_bytes).hexdigest(),
+            )
+
     normalized, alignment_mode, content_quad = warp_to_size(image, quad, width, height)
 
     actual_h, actual_w = normalized.shape[:2]
+    if forensic is not None:
+        forensic.save_stage_image("01-input-or-rectified.png", normalized)
+        forensic.record_working_image(actual_w, actual_h)
     size_match = (actual_w == width and actual_h == height)
     if not size_match:
         sys.stderr.write(
@@ -2540,6 +2642,13 @@ def main():
             barcode_status = refined_barcode_status
 
     has_subjects = bool(layout.get("subjects"))
+    if forensic is not None:
+        forensic.save_stage_image("02-grayscale.png", gray)
+        forensic.record_alignment(
+            borderDx=dx,
+            borderDy=dy,
+            borderConfidence=round(alignment_confidence, 3),
+        )
     if has_subjects:
         H, section_transform_info = _compute_section_transform(gray, layout, width, height)
     else:
@@ -2550,22 +2659,82 @@ def main():
         and section_transform_info.get("confidence", 0) >= 0.4
         and section_transform_info.get("point_count", 0) >= 4
     )
+    if forensic is not None:
+        if section_transform_info:
+            section_rejection = None
+            if not use_section_xform:
+                section_rejection = section_transform_info.get("error") or (
+                    "CONFIDENCE_BELOW_0.40"
+                    if float(section_transform_info.get("confidence", 0) or 0) < 0.4
+                    else "INSUFFICIENT_POINTS"
+                )
+            forensic.record_section_transform(
+                H, section_transform_info, bool(use_section_xform),
+                rejection_reason=section_rejection,
+            )
+        else:
+            forensic.record_section_transform(None, {}, False, rejection_reason="NOT_COMPUTED")
 
     detected_bubbles, filled_threshold_mask = detect_filled_bubble_contours(normalized)
     raw_candidate_count = len(detected_bubbles)
+    if forensic is not None:
+        forensic.threshold_mask = filled_threshold_mask
+        forensic.save_stage_image("03-threshold.png", filled_threshold_mask)
+        forensic.save_stage_image(
+            "04-raw-contours.png",
+            forensic.draw_candidate_overlay(
+                gray, detected_bubbles,
+                "raw contours (%d)" % raw_candidate_count,
+            ),
+        )
+        forensic.log_raw_contours(detected_bubbles)
 
     # ROI filter: only keep candidates inside known answer regions
     # (subject blocks, entry group, equity group).  This excludes QR patterns,
     # logos, corner markers, borders, header text, etc.
     scan_regions = _build_scan_regions(layout)
+    pre_roi_bubbles = list(detected_bubbles)
     if scan_regions:
         detected_bubbles = [b for b in detected_bubbles if _inside_any_region(b, scan_regions)]
     else:
         sys.stderr.write("layout_worker warning: no scan regions built; skipping ROI candidate filter\n")
     roi_candidate_count = len(detected_bubbles)
+    if forensic is not None:
+        forensic.record_roi_filter(pre_roi_bubbles, detected_bubbles)
+        forensic.save_stage_image(
+            "05-roi-filtered-contours.png",
+            forensic.draw_candidate_overlay(
+                gray, detected_bubbles,
+                "ROI-filtered contours (%d)" % roi_candidate_count,
+            ),
+        )
 
     anchor_transform, anchor_info = _detect_registration_anchor_transform(gray, layout)
-    anchor_active = bool(anchor_transform is not None and anchor_info.get("success"))
+    anchor_confidence = float((anchor_info or {}).get("confidence") or 0) if anchor_info else 0.0
+    anchor_active = bool(
+        anchor_transform is not None
+        and anchor_info is not None
+        and anchor_info.get("success")
+        and anchor_confidence >= 0.30
+    )
+    if anchor_transform is not None and not anchor_active:
+        sys.stderr.write(
+            f"layout_worker anchor_transform: rejected low-confidence anchor "
+            f"homography (confidence={anchor_confidence:.2f}, "
+            f"meanError={anchor_info.get('meanError') if anchor_info else '?'}, "
+            f"detected={anchor_info.get('detectedCount') if anchor_info else '?'}); "
+            f"falling back to border/section alignment\n"
+        )
+    if forensic is not None:
+        try:
+            anchor_inv = np.linalg.inv(anchor_transform) if anchor_transform is not None else None
+        except Exception:
+            anchor_inv = None
+        forensic.record_anchor_transform(anchor_info, anchor_transform, anchor_inv)
+        forensic.save_stage_image(
+            "06-anchor-mapping.png",
+            forensic.draw_anchor_overlay(gray, anchor_info),
+        )
     classified_bubbles = _transform_bubbles_to_layout_space(detected_bubbles, anchor_transform) if anchor_active else detected_bubbles
     fallback_H = None
     if anchor_active:
@@ -2582,6 +2751,7 @@ def main():
         debug_dir=problem_debug_dir,
         request_id=request_id,
         debug_ratios=debug_ratios,
+        forensic=forensic,
     )
     entry_result = contour_result["entryResult"]
     equity_result = contour_result["equityResult"]
@@ -2598,6 +2768,17 @@ def main():
     mapped_bubble_count = len(mapped_bubbles)
     detected_bubble_count = len(detected_bubbles)
     unmapped_bubble_count = len(unmapped_bubbles)
+    if forensic is not None:
+        forensic.record_counts(
+            rawCandidates=raw_candidate_count,
+            afterRoiFilter=roi_candidate_count,
+            mappedBubbleCount=mapped_bubble_count,
+            unmappedBubbleCount=unmapped_bubble_count,
+            detectedAnswers=detected_count,
+            blank=blank_count,
+            multiple=multiple_count,
+            detectedBubbleCount=detected_bubble_count,
+        )
     evaluated_bubble_count = 0
     evaluated_bubble_count += len(entry_result.get("metrics") or [])
     evaluated_bubble_count += len(equity_result.get("metrics") or [])
@@ -2662,6 +2843,8 @@ def main():
         full_path = debug_dir / filename
         cv2.imwrite(str(full_path), overlay)
         debug_path = f"/uploads/debug/{filename}"
+        if forensic is not None:
+            forensic.save_stage_image("07-final-mapping.png", overlay)
 
         alignment_overlay = normalized.copy()
         cv2.putText(
@@ -2832,6 +3015,22 @@ def main():
         "processedSuccessfully": True,
         "omrEngineUsed": "generated-layout",
     }
+    if forensic is not None:
+        try:
+            forensic.record_alignment(
+                anchorActive=anchor_active,
+                anchorConfidence=round(anchor_confidence, 3),
+                sectionTransformActive=use_section_xform,
+                sectionTransformConfidence=round(section_conf, 3),
+                borderConfidence=round(alignment_confidence, 3),
+                mappingConfidence=round(mapping_confidence, 3),
+            )
+            forensic.record_scan_summary(log_payload)
+            forensic.finalize_questions(gray, fallback_H, threshold)
+            bundle_path = forensic.close(result=result)
+            result["forensicDebugBundle"] = bundle_path
+        except Exception as exc:
+            sys.stderr.write(f"layout_worker forensic: finalize failed ({exc})\n")
     sys.stdout.write(json.dumps(result))
 
 

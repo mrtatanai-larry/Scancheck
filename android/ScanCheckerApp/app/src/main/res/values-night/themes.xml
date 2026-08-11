@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <style name="Theme.ScanCheckerApp" parent="android:style/Theme.Material.NoActionBar">
-        <item name="android:forceDarkAllowed">true</item>
-        <item name="android:windowNoTitle">true</item>
-        <item name="android:windowActionBar">false</item>
-    </style>
-</resources>

@@ -9,8 +9,8 @@ class SubjectReportManager {
     async loadSubjectReport() {
         try {
             const subjectCode = document.getElementById('reportSubjectSelect')?.value || '';
-            const entryType = document.getElementById('reportEntrySelect')?.value || '';
-            const equityGroup = document.getElementById('reportEquitySelect')?.value || '';
+            const entryType = document.getElementById('reportEntryFilter')?.value || '';
+            const equityGroup = document.getElementById('reportEquityFilter')?.value || '';
             const dateFrom = document.getElementById('reportDateFrom')?.value || '';
             const dateTo = document.getElementById('reportDateTo')?.value || '';
             const minScore = document.getElementById('reportMinScore')?.value || '';
@@ -43,7 +43,7 @@ class SubjectReportManager {
         const container = document.getElementById('subjectReport');
         if (!container) return;
         
-        const records = report;
+        const records = Array.isArray(report) ? report : (report.records || []);
         
         if (!records || records.length === 0) {
             container.innerHTML = '<div class="alert alert-info text-center py-4">No subject records found for the selected filters.</div>';
@@ -218,10 +218,16 @@ class SubjectReportManager {
     }
 
     renderCharts(subjectRanking, departmentRanking) {
+        // Destroy existing chart instances to prevent memory/event-listener leaks
+        if (this._subjectCharts) {
+            this._subjectCharts.forEach(c => { try { c.destroy(); } catch(e) {} });
+        }
+        this._subjectCharts = [];
+
         // Subject Chart
         const subjectCtx = document.getElementById('subjectChartReport');
         if (subjectCtx) {
-            new Chart(subjectCtx, {
+            this._subjectCharts.push(new Chart(subjectCtx, {
                 type: 'bar',
                 data: {
                     labels: subjectRanking.map(r => r.subjectCode),
@@ -257,13 +263,13 @@ class SubjectReportManager {
                         }
                     }
                 }
-            });
+            }));
         }
 
         // Department Chart
         const departmentCtx = document.getElementById('departmentChartReport');
         if (departmentCtx) {
-            new Chart(departmentCtx, {
+            this._subjectCharts.push(new Chart(departmentCtx, {
                 type: 'bar',
                 data: {
                     labels: departmentRanking.map(r => r.department),
@@ -299,7 +305,7 @@ class SubjectReportManager {
                         }
                     }
                 }
-            });
+            }));
         }
     }
 
@@ -412,8 +418,8 @@ class SubjectReportManager {
 
     async deleteAllRecords() {
         const subjectCode = document.getElementById('reportSubjectSelect')?.value || '';
-        const entryType = document.getElementById('reportEntrySelect')?.value || '';
-        const equityGroup = document.getElementById('reportEquitySelect')?.value || '';
+        const entryType = document.getElementById('reportEntryFilter')?.value || '';
+        const equityGroup = document.getElementById('reportEquityFilter')?.value || '';
         const dateFrom = document.getElementById('reportDateFrom')?.value || '';
         const dateTo = document.getElementById('reportDateTo')?.value || '';
 

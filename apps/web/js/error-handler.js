@@ -181,10 +181,16 @@ class ErrorHandler {
       return true;
     }
 
+    // Only explicit HTTP/auth statuses should force logout. Provider errors such
+    // as "AI scanner authentication failed" are configuration errors, not user
+    // session failures.
+    if (error.status || error.statusCode || error.response?.status || error.response?.statusCode) {
+      return false;
+    }
+
     // Check error message
     const message = (error.message || '').toLowerCase();
     if (message.includes('unauthorized') || 
-        message.includes('authentication') ||
         message.includes('token') ||
         message.includes('session expired')) {
       return true;
@@ -224,6 +230,10 @@ class ErrorHandler {
    * @private
    */
   _formatErrorMessage(error, errorType) {
+    if (error && error.code === 'DUPLICATE_RECORD') {
+      return error.payload?.error || 'This paper has already been saved to records.';
+    }
+
     switch (errorType) {
       case this.errorTypes.NETWORK:
         return 'Cannot connect to server. Please check if the server is running.';

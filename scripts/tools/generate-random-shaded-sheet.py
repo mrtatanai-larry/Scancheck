@@ -106,7 +106,7 @@ def detect_subject_spans(question_blocks):
 
     # Preferred mapping for this project: 10 blocks in order, 2 blocks per subject.
     if len(blocks) == 10:
-        names = ["MATH", "ENG", "SCI", "SOC", "FIL"]
+        names = ["ENG", "SCI", "MATH", "GEN", "ABS"]
         spans = []
         for i, name in enumerate(names):
             left = blocks[i * 2]
@@ -142,7 +142,7 @@ def main():
     parser.add_argument(
         "--subject-counts",
         default="",
-        help="Explicit per-subject shaded counts, e.g. MATH=15,ENG=25,SCI=10,SOC=12,FIL=18",
+        help="Explicit per-subject shaded counts, e.g. ENG=15,SCI=25,MATH=10,GEN=12,ABS=18",
     )
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument(

@@ -3,7 +3,7 @@
 -- 1. Subjects Table (Defines the 5 subjects)
 CREATE TABLE IF NOT EXISTS subjects (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    code TEXT NOT NULL UNIQUE,        -- e.g., MATH, ENG, SCI, SOC, FIL
+    code TEXT NOT NULL UNIQUE,        -- e.g., ENG, SCI, MATH, GEN, ABS
     name TEXT NOT NULL,               -- e.g., Mathematics, English, Science
     description TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS quizzes (
 -- 3. Scans Table (Main OMR Results with 5 subject scores)
 CREATE TABLE IF NOT EXISTS scans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    student_id TEXT NOT NULL,
+    sheet_id TEXT,
+    student_id TEXT,
     student_name TEXT NOT NULL,
     quiz_id INTEGER,                  -- Optional: if scanning specific quiz
     answers TEXT NOT NULL,            -- JSON array of all answers
@@ -131,11 +132,11 @@ CREATE TABLE IF NOT EXISTS answer_keys (
 
 -- 6. Insert Default Subjects
 INSERT OR IGNORE INTO subjects (code, name, description) VALUES
-('MATH', 'Mathematics', 'Numerical and analytical skills assessment'),
 ('ENG', 'English', 'Language proficiency and comprehension'),
 ('SCI', 'Science', 'Scientific knowledge and reasoning'),
-('SOC', 'Social Studies', 'Historical and social awareness'),
-('FIL', 'Filipino', 'National language proficiency');
+('MATH', 'Mathematics', 'Numerical and analytical skills assessment'),
+('GEN', 'General Knowledge', 'General awareness and information'),
+('ABS', 'Abstract Reasoning', 'Logical and abstract thinking assessment');
 
 -- 7. Create Indexes for Performance
 CREATE INDEX IF NOT EXISTS idx_scans_student_id ON scans(student_id);
@@ -146,3 +147,39 @@ CREATE INDEX IF NOT EXISTS idx_scans_overall_status ON scans(overall_status);
 CREATE INDEX IF NOT EXISTS idx_subject_records_student_subject ON subject_records(student_id, subject_id);
 CREATE INDEX IF NOT EXISTS idx_subject_records_timestamp ON subject_records(timestamp);
 CREATE INDEX IF NOT EXISTS idx_quizzes_subject_id ON quizzes(subject_id);
+
+CREATE TABLE IF NOT EXISTS ai_omr_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id TEXT,
+    layout_id TEXT,
+    exam_id TEXT,
+    provider TEXT,
+    model TEXT,
+    strategy TEXT,
+    question_count INTEGER,
+    request_count INTEGER,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    total_tokens INTEGER,
+    processing_time_ms INTEGER,
+    review_count INTEGER,
+    success INTEGER DEFAULT 0,
+    error_code TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS ai_layout_profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    layout_id TEXT NOT NULL UNIQUE,
+    strategy TEXT,
+    model TEXT,
+    section_size INTEGER,
+    image_detail TEXT,
+    verification_mode TEXT,
+    prompt_version TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_omr_usage_timestamp ON ai_omr_usage(timestamp);
+CREATE INDEX IF NOT EXISTS idx_ai_omr_usage_layout_id ON ai_omr_usage(layout_id);
+CREATE INDEX IF NOT EXISTS idx_ai_layout_profiles_layout_id ON ai_layout_profiles(layout_id);

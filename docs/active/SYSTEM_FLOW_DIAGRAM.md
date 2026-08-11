@@ -1,623 +1,177 @@
-# ScanCheck System - Complete Flow Diagram
+# ScanCheck System - AI Vision Flow Diagram
 
-## 🎯 Overview
+This document describes the current scan flow. The system reads bubbled answer sheets with an AI vision-language model (Gemini, optional Ollama), not the retired deterministic pixel-threshold OMR scanner.
 
-This document provides visual representations of the complete system flow.
+For the complete authoritative description of the current state, see `docs/active/SYSTEM_CURRENT_STATE_DETAILED.md`.
+
+> **Retired paths** — `POST /api/scans/process` and `POST /api/omr/debug-bubbles` return HTTP `410`. Older docs that describe them as the active product path are out of date.
 
 ---
 
-## 📊 Main System Flow
+## Main System Flow
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         SCANCHECK SYSTEM                             │
-│                      Complete Processing Flow                        │
+│                      AI Vision Scan Flow                             │
 └─────────────────────────────────────────────────────────────────────┘
 
-┌─────────────────────────────────────────────────────────────────────┐
-│                        📱 MOBILE APP                                 │
-│                     (Image Capture Only)                             │
-└─────────────────────────────────────────────────────────────────────┘
+                  Generated answer sheet (dashboard)
+                  - prints QR + registration anchors + bubble grid
+                  - layout JSON saved via POST /api/omr/layouts
                                 │
-                                │ 1. Capture Image
-                                │    - Open camera
-                                │    - Align answer sheet
-                                │    - Take photo
-                                │    - Convert to Bitmap
+                                │ photo / scan of printed sheet
                                 ↓
-                    ┌───────────────────────┐
-                    │   Local Image File    │
-                    │   (Bitmap format)     │
-                    └───────────────────────┘
+            ┌───────────────────────────────────────┐
+            │   POST /api/ai-omr/scan (authenticated)│
+            │   (also POST /api/ocr extraction path) │
+            └───────────────────────────────────────┘
                                 │
-                                │ 2. Convert & Prepare
-                                │    - Compress image
-                                │    - Encode as base64
-                                │    - Add metadata
+                                │ 1. Read image (base64 data URL or stored path)
                                 ↓
-                    ┌───────────────────────┐
-                    │   Upload Package      │
-                    │   {                   │
-                    │     studentId,        │
-                    │     studentName,      │
-                    │     quizId,           │
-                    │     photo: base64,    │
-                    │     questionCount     │
-                    │   }                   │
-                    └───────────────────────┘
+                    ┌──────────────────────────┐
+                    │  Identify layout          │
+                    │  - supplied layoutId/examId│
+                    │  - QR decode (jsQR)        │
+                    │  - latest compatible layout│
+                    └──────────────────────────┘
                                 │
-                                │ 3. HTTP POST
-                                │    /api/scans/process
-                                │    (60 second timeout)
+                                │ 2. Load generated layout JSON
+                                │    (.runtime/data/omr-layouts)
                                 ↓
-┌─────────────────────────────────────────────────────────────────────┐
-│                        ☁️ WEB SERVER                                 │
-│                   (Complete OMR Processing)                          │
-└─────────────────────────────────────────────────────────────────────┘
+                    ┌──────────────────────────┐
+                    │  Prepare page (optional)  │
+                    │  - pagePrepWorker.py       │
+                    │    (OpenCV perspective     │
+                    │     correction, graceful    │
+                    │     fallback to original)   │
+                    └──────────────────────────┘
                                 │
-                                │ 4. Receive Request
-                                │    - Extract base64 data
-                                │    - Validate image format
-                                │    - Convert to buffer
+                                │ 3. Crop sections via layout coords
+                                │    sectionCropper.js (Jimp)
                                 ↓
-                    ┌───────────────────────┐
-                    │   Image Buffer        │
-                    │   (Raw binary data)   │
-                    └───────────────────────┘
+                    ┌──────────────────────────┐
+                    │  Top-field crop            │
+                    │  (student fields)          │
+                    └──────────────────────────┘
                                 │
-                                │ 5. Preprocess Image
-                                │    - Convert to grayscale
-                                │    - Normalize brightness
-                                │    - Apply threshold (128)
+                                │ 4. AI reads each crop
+                                │    provider.generateOmrResult()
+                                │    (Gemini / Ollama vision)
                                 ↓
-                    ┌───────────────────────┐
-                    │   Binary Image        │
-                    │   (Black & White)     │
-                    └───────────────────────┘
+                    ┌──────────────────────────┐
+                    │  Validate structured result│
+                    │  (omrResultSchema:          │
+                    │   selected / blank /         │
+                    │   multiple / uncertain)      │
+                    └──────────────────────────┘
                                 │
-                                │ 6. Detect Document
-                                │    - Find boundaries
-                                │    - Resize to 800x1000
-                                │    - (Future: perspective correction)
+                                │ 5. Confidence handling
+                                │    - retry section if many unreadable
+                                │    - verify low-confidence marks
+                                │      (verification.js)
                                 ↓
-                    ┌───────────────────────┐
-                    │   Warped Image        │
-                    │   (Straightened)      │
-                    └───────────────────────┘
+                    ┌──────────────────────────┐
+                    │  Answers vector + records  │
+                    │  state counts + review set │
+                    └──────────────────────────┘
                                 │
-                                │ 7. Detect Bubbles
-                                │    - Calculate grid layout
-                                │    - For each question:
-                                │      * Check each option
-                                │      * Count dark pixels
-                                │      * Calculate fill ratio
-                                │      * Select most filled
+                                │ 6. Score (optional quizId)
+                                │    against answer_keys
                                 ↓
-                    ┌───────────────────────┐
-                    │   Answers Array       │
-                    │   ["A","B","C","D"...]│
-                    └───────────────────────┘
+                    ┌──────────────────────────┐
+                    │  Persist run + usage       │
+                    │  - ai-omr/results JSON     │
+                    │  - ai_omr_usage rows       │
+                    └──────────────────────────┘
                                 │
-                                │ 8. Detect Metadata
-                                │    - Proctor status
-                                │    - Entry type
-                                │    - Equity group
+                                │ 7. Response
+                                │    answers, questions, review,
+                                │    topFields, metrics, scoring
                                 ↓
-                    ┌───────────────────────┐
-                    │   Complete OMR Data   │
-                    │   {                   │
-                    │     answers: [...],   │
-                    │     proctorStatus,    │
-                    │     entryType,        │
-                    │     equityGroup       │
-                    │   }                   │
-                    └───────────────────────┘
-                                │
-                                │ 9. Get Answer Key
-                                │    - Query database
-                                │    - Get correct answers
-                                ↓
-                    ┌───────────────────────┐
-                    │   Correct Answers     │
-                    │   ["A","C","B","D"...]│
-                    └───────────────────────┘
-                                │
-                                │ 10. Calculate Scores
-                                │     - Compare answers
-                                │     - Count correct
-                                │     - Calculate percentage
-                                │     - Per-subject (if multi)
-                                │     - Overall score
-                                ↓
-                    ┌───────────────────────┐
-                    │   Score Results       │
-                    │   {                   │
-                    │     score: 85,        │
-                    │     total: 100,       │
-                    │     percentage: 85%,  │
-                    │     status: Passinhon │
-                    │   }                   │
-                    └───────────────────────┘
-                                │
-                                │ 11. Store Image
-                                │     - Save original
-                                │     - Generate thumbnail
-                                │     - Get file paths
-                                ↓
-                    ┌───────────────────────┐
-                    │   Stored Files        │
-                    │   /uploads/images/... │
-                    │   /uploads/thumbs/... │
-                    └───────────────────────┘
-                                │
-                                │ 12. Save to Database
-                                │     - Insert into scans
-                                │     - Insert subject_records
-                                │     - Store all data
-                                ↓
-                    ┌───────────────────────┐
-                    │   Database Record     │
-                    │   (scans table)       │
-                    │   - ID: 123           │
-                    │   - Student info      │
-                    │   - Answers (JSON)    │
-                    │   - Scores            │
-                    │   - Image paths       │
-                    │   - Timestamp         │
-                    └───────────────────────┘
-                                │
-                                │ 13. Return Results
-                                │     - Format JSON response
-                                │     - Include all scores
-                                │     - Send to mobile app
-                                ↓
-┌─────────────────────────────────────────────────────────────────────┐
-│                        📱 MOBILE APP                                 │
-│                      (Display Results)                               │
-└─────────────────────────────────────────────────────────────────────┘
-                                │
-                                │ 14. Receive Response
-                                │     - Parse JSON
-                                │     - Extract scores
-                                ↓
-                    ┌───────────────────────┐
-                    │   Results Dialog      │
-                    │   ┌─────────────────┐ │
-                    │   │ Score: 85/100   │ │
-                    │   │ Percentage: 85% │ │
-                    │   │ Status: Pass    │ │
-                    │   │                 │ │
-                    │   │ [Scan Again]    │ │
-                    │   │ [Done]          │ │
-                    │   └─────────────────┘ │
-                    └───────────────────────┘
-                                │
-                                │ 15. User Action
-                                │     - Scan another sheet
-                                │     - Or exit
-                                ↓
-                            [END]
-
-┌─────────────────────────────────────────────────────────────────────┐
-│                        💻 WEB DASHBOARD                              │
-│                    (Real-time Monitoring)                            │
-└─────────────────────────────────────────────────────────────────────┘
-                                │
-                                │ Auto-refresh every 5 seconds
-                                │ GET /api/scans
-                                ↓
-                    ┌───────────────────────┐
-                    │   All Scan Results    │
-                    │   - Recent scans      │
-                    │   - Statistics        │
-                    │   - Reports           │
-                    │   - Export options    │
-                    └───────────────────────┘
+                        [Dashboard / Client]
 ```
 
 ---
 
-## 🔍 Detailed Component Breakdown
+## Detailed Component Breakdown
 
-### **1. Mobile App - Image Capture**
+### 1. Layout identification
 
-```
-┌──────────────────────────────────────┐
-│         ScanActivity.kt              │
-├──────────────────────────────────────┤
-│                                      │
-│  processScan()                       │
-│    ↓                                 │
-│  capture.takePicture()               │
-│    ↓                                 │
-│  ImageUtils.imageProxyToBitmap()     │
-│    ↓                                 │
-│  uploadImageForProcessing()          │
-│    ↓                                 │
-│  POST /api/scans/process             │
-│                                      │
-└──────────────────────────────────────┘
-```
+- A QR code on the generated sheet encodes the layout identity (`examId`, `layoutId`, `quizId`).
+- `qrDecode.js` attempts several full-image and cropped/enhanced candidates with `jsQR` and returns the layout id from the decoded payload.
+- If no QR is readable, the caller can supply `layoutId`/`examId`, or the server falls back to the latest compatible generated layout for a selected quiz.
+- No layout id → `AI_OMR_LAYOUT_IDENTIFICATION_FAILED` (422). No layout file → `AI_OMR_LAYOUT_NOT_FOUND` (404).
 
-### **2. Server - OMR Processing**
+### 2. Page preparation
 
-```
-┌──────────────────────────────────────┐
-│         api.js                       │
-├──────────────────────────────────────┤
-│                                      │
-│  POST /api/scans/process             │
-│    ↓                                 │
-│  Extract image buffer                │
-│    ↓                                 │
-│  omrProcessor.processAnswerSheet()   │
-│    ↓                                 │
-│  calculateScores()                   │
-│    ↓                                 │
-│  processAndStoreImage()              │
-│    ↓                                 │
-│  database.run(INSERT INTO scans)     │
-│    ↓                                 │
-│  res.json(results)                   │
-│                                      │
-└──────────────────────────────────────┘
+- `imagePreparation.js` calls `pagePrepWorker.py` (Python/OpenCV) to warp the photographed page to the sheet's expected dimensions using registration anchors.
+- The worker is optional: any failure falls back to the original image (`usedWorker: false`, mode recorded in `metrics.pagePreparation`).
 
-┌──────────────────────────────────────┐
-│      omr-processor.js                │
-├──────────────────────────────────────┤
-│                                      │
-│  processAnswerSheet()                │
-│    ↓                                 │
-│  preprocessImage()                   │
-│    ├─ sharp.grayscale()              │
-│    ├─ sharp.normalize()              │
-│    └─ sharp.threshold(128)           │
-│    ↓                                 │
-│  detectAndWarpDocument()             │
-│    └─ sharp.resize(800, 1000)        │
-│    ↓                                 │
-│  detectBubbles()                     │
-│    ├─ Calculate grid layout          │
-│    ├─ For each question:             │
-│    │   ├─ For each option:           │
-│    │   │   ├─ Get bubble region      │
-│    │   │   ├─ Count dark pixels      │
-│    │   │   └─ Calculate fill ratio   │
-│    │   └─ Select most filled         │
-│    └─ Return answers array           │
-│    ↓                                 │
-│  detectProctorStatus()               │
-│  detectEntryType()                   │
-│  detectEquityGroup()                 │
-│    ↓                                 │
-│  Return complete OMR result          │
-│                                      │
-└──────────────────────────────────────┘
-```
+### 3. Cropping strategy
 
-### **3. Database Storage**
+`sectionCropper.js` builds crops from the layout coordinates:
 
-```
-┌──────────────────────────────────────┐
-│         SQLite Database              │
-├──────────────────────────────────────┤
-│                                      │
-│  scans table:                        │
-│    - id (PRIMARY KEY)                │
-│    - student_id                      │
-│    - student_name                    │
-│    - quiz_id                         │
-│    - answers (JSON)                  │
-│    - total_score                     │
-│    - percentage                      │
-│    - status                          │
-│    - image_path                      │
-│    - thumbnail_path                  │
-│    - timestamp                       │
-│    - entry_type                      │
-│    - special_equity_group            │
-│    - (subject scores...)             │
-│                                      │
-│  subject_records table:              │
-│    - id (PRIMARY KEY)                │
-│    - scan_id (FOREIGN KEY)           │
-│    - student_id                      │
-│    - subject_code                    │
-│    - score                           │
-│    - percentage                      │
-│    - status                          │
-│    - timestamp                       │
-│                                      │
-└──────────────────────────────────────┘
-```
+| Strategy | Behavior |
+| --- | --- |
+| `whole_sheet` | One crop of the full page |
+| `section_10` | 10-question crops (higher accuracy) |
+| `section_20` | 20-question crops (faster; default) |
+| `auto` | Normalizes toward section-based scanning |
+| `fast` | Larger sections (section_20) |
+| `high_accuracy` | Smaller sections (section_10) |
+| `custom` | Uses the requested strategy/settings |
+
+The top-field region is cropped separately and read for student metadata fields.
+
+### 4. AI reading
+
+- Each crop is sent to the provider (`GeminiProvider` via `@google/genai`, or `OllamaProvider`).
+- The prompt instructs the model to report each question's state (`selected`, `blank`, `multiple`, `uncertain`), selected options, and confidence.
+- `runSectionWithValidation` retries once when the structured result fails schema validation; unrecoverable response errors mark those questions for review.
+
+### 5. Confidence handling
+
+- Sections with many unreadable records are retried with a wider crop; the better result wins (`preferSectionRecords`).
+- When verification is enabled (`uncertain`/`always`), `verification.js` re-crops and re-reads low-confidence or uncertain questions and merges results (`ai_pass_disagreement` review flags where applicable).
+
+### 6. Scoring
+
+- If a `quizId` is supplied, detected answers are compared against `answer_keys`.
+- Produces total score, percentage, and per-subject results for multi-subject sheets.
+
+### 7. Output
+
+The result includes:
+
+- `answers` — answer vector per question
+- `questions` — per-question records (state, options, confidence, review flags)
+- `needsReview` — question numbers needing human review
+- `topFields` — student field reads
+- `metrics` — crop count, API calls, latency, token usage, page-preparation mode, verification metrics, per-section details
+- `scoringStatus` / `subjectResults` — when scored
+
+Result JSON is also persisted under `.runtime/data/ai-omr/results/` and usage is recorded in the `ai_omr_usage` table.
 
 ---
 
-## 🎨 Bubble Detection Algorithm
+## Retired Deterministic OMR Path (historical)
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│              Bubble Detection Process                        │
-└─────────────────────────────────────────────────────────────┘
+The old flow (grayscale → threshold → detect document → resize to 800x1000 → pixel fill-ratio bubble detection in Python `layout_worker.py`) is **retired**:
 
-Input: Warped image (800x1000 pixels)
-       Question count (e.g., 100)
-       Options per question (e.g., 4)
+- `POST /api/scans/process` → `410 LEGACY_OMR_RETIRED`
+- `POST /api/omr/debug-bubbles` → `410 LEGACY_OMR_DEBUG_RETIRED`
+- `POST /api/ocr` requires the AI scanner; without it, it returns `503 AI_OMR_REQUIRED`.
 
-Step 1: Calculate Grid Layout
-┌─────────────────────────────────────┐
-│  rowHeight = imageHeight / questions │
-│  colWidth = imageWidth / options     │
-│                                      │
-│  Example (100 questions, 4 options): │
-│    rowHeight = 1000 / 100 = 10px     │
-│    colWidth = 800 / 4 = 200px        │
-└─────────────────────────────────────┘
-
-Step 2: For Each Question (row)
-┌─────────────────────────────────────┐
-│  For row = 0 to questionCount-1:    │
-│    maxFill = 0                       │
-│    selectedOption = ""               │
-│                                      │
-│    For col = 0 to options-1:         │
-│      ↓                               │
-└─────────────────────────────────────┘
-
-Step 3: Calculate Bubble Region
-┌─────────────────────────────────────┐
-│  bubbleX = col * colWidth + 20%      │
-│  bubbleY = row * rowHeight + 20%     │
-│  bubbleWidth = colWidth * 60%        │
-│  bubbleHeight = rowHeight * 60%      │
-│                                      │
-│  Example (Question 1, Option A):     │
-│    bubbleX = 0 * 200 + 40 = 40       │
-│    bubbleY = 0 * 10 + 2 = 2          │
-│    bubbleWidth = 200 * 0.6 = 120     │
-│    bubbleHeight = 10 * 0.6 = 6       │
-└─────────────────────────────────────┘
-
-Step 4: Count Dark Pixels
-┌─────────────────────────────────────┐
-│  darkPixels = 0                      │
-│  totalPixels = 0                     │
-│                                      │
-│  For each pixel in bubble region:    │
-│    brightness = (R + G + B) / 3      │
-│    if brightness < 128:              │
-│      darkPixels++                    │
-│    totalPixels++                     │
-│                                      │
-│  fillRatio = darkPixels / totalPixels│
-└─────────────────────────────────────┘
-
-Step 5: Select Option
-┌─────────────────────────────────────┐
-│  if fillRatio > maxFill AND          │
-│     fillRatio > 0.30:                │
-│    maxFill = fillRatio               │
-│    selectedOption = optionLetter[col]│
-│                                      │
-│  Example:                            │
-│    Option A: fillRatio = 0.15 ❌     │
-│    Option B: fillRatio = 0.85 ✅     │
-│    Option C: fillRatio = 0.10 ❌     │
-│    Option D: fillRatio = 0.05 ❌     │
-│    → Selected: "B"                   │
-└─────────────────────────────────────┘
-
-Step 6: Store Answer
-┌─────────────────────────────────────┐
-│  answers[row] = selectedOption       │
-│                                      │
-│  If no option > 30% threshold:       │
-│    answers[row] = ""  (blank)        │
-└─────────────────────────────────────┘
-
-Output: answers = ["A", "B", "C", "D", "", "A", ...]
-```
+The Python workers in `services/omr-python/python_omr/` remain on disk for reference only. The only Python helper still invoked by the active path is `pagePrepWorker.py` (optional page prep).
 
 ---
 
-## 📊 Score Calculation Flow
+## Quick Reference
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│              Score Calculation Process                       │
-└─────────────────────────────────────────────────────────────┘
-
-Input: Detected answers = ["A", "B", "C", "D", ...]
-       Quiz ID = 1
-
-Step 1: Get Correct Answers
-┌─────────────────────────────────────┐
-│  SELECT correct_answers              │
-│  FROM quizzes                        │
-│  WHERE id = quizId                   │
-│    ↓                                 │
-│  correctAnswers = ["A", "C", "C", ...]│
-└─────────────────────────────────────┘
-
-Step 2: Compare Answers
-┌─────────────────────────────────────┐
-│  score = 0                           │
-│                                      │
-│  For i = 0 to questionCount-1:       │
-│    studentAns = answers[i].toUpper() │
-│    correctAns = correctAnswers[i]    │
-│                                      │
-│    if studentAns == correctAns:      │
-│      score++                         │
-│                                      │
-│  Example:                            │
-│    Q1: "A" == "A" ✅ score = 1       │
-│    Q2: "B" != "C" ❌ score = 1       │
-│    Q3: "C" == "C" ✅ score = 2       │
-│    ...                               │
-└─────────────────────────────────────┘
-
-Step 3: Calculate Percentage
-┌─────────────────────────────────────┐
-│  percentage = (score / total) * 100  │
-│                                      │
-│  Example:                            │
-│    score = 85                        │
-│    total = 100                       │
-│    percentage = 85.0%                │
-└─────────────────────────────────────┘
-
-Step 4: Determine Status
-┌─────────────────────────────────────┐
-│  if percentage >= 70:                │
-│    status = "Passinhon"              │
-│  else:                               │
-│    status = "Non-passinhon"          │
-│                                      │
-│  if proctorStatus is set:            │
-│    status = proctorStatus (override) │
-└─────────────────────────────────────┘
-
-Step 5: Multi-Subject Breakdown (if applicable)
-┌─────────────────────────────────────┐
-│  Subjects:                           │
-│    MATH: Q1-20   (answers[0-19])     │
-│    ENG:  Q21-40  (answers[20-39])    │
-│    SCI:  Q41-60  (answers[40-59])    │
-│    SOC:  Q61-80  (answers[60-79])    │
-│    FIL:  Q81-100 (answers[80-99])    │
-│                                      │
-│  For each subject:                   │
-│    Calculate score (0-20)            │
-│    Calculate percentage              │
-│    Determine status (Pass/Fail)      │
-└─────────────────────────────────────┘
-
-Output: 
-{
-  score: 85,
-  totalQuestions: 100,
-  percentage: 85.0,
-  status: "Passinhon",
-  subjectScores: {
-    MATH: { score: 18, percentage: 90, status: "Passinhon" },
-    ENG: { score: 17, percentage: 85, status: "Passinhon" },
-    ...
-  }
-}
-```
-
----
-
-## 🔄 Data Flow Timeline
-
-```
-Time    Mobile App              Server                  Database
-────────────────────────────────────────────────────────────────────
-0.0s    Capture image          
-        │                      
-0.5s    Convert to base64      
-        │                      
-1.0s    Upload starts ────────→ Receive request
-        │                       │
-1.5s    Uploading...            Extract image buffer
-        │                       │
-2.0s    Upload complete         Preprocess image
-        │                       │
-2.5s    Waiting...              Detect document
-        │                       │
-3.0s    Waiting...              Detect bubbles
-        │                       │
-4.0s    Waiting...              Detect metadata
-        │                       │
-4.5s    Waiting...              Get answer key ────→ Query
-        │                       │                    │
-5.0s    Waiting...              Calculate scores     Return data
-        │                       │                    │
-5.5s    Waiting...              Store image ───────→ Save files
-        │                       │                    │
-6.0s    Waiting...              Save to DB ────────→ INSERT
-        │                       │                    │
-6.5s    Receive results ←────── Return JSON          Commit
-        │                       
-7.0s    Display results        
-        │                      
-7.5s    Show dialog            
-```
-
----
-
-## 📱 Mobile App State Machine
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│              Mobile App States                               │
-└─────────────────────────────────────────────────────────────┘
-
-    [START]
-       │
-       ↓
-┌──────────────┐
-│   READY      │  Status: "Camera ready — align sheet"
-│              │  Button: Enabled
-└──────────────┘
-       │
-       │ User clicks capture
-       ↓
-┌──────────────┐
-│  CAPTURING   │  Status: "Capturing image..."
-│              │  Button: Disabled
-└──────────────┘
-       │
-       │ Image captured
-       ↓
-┌──────────────┐
-│  UPLOADING   │  Status: "Uploading image to server..."
-│              │  Button: Disabled
-└──────────────┘
-       │
-       │ Upload complete
-       ↓
-┌──────────────┐
-│  PROCESSING  │  Status: "Server processing image..."
-│              │  Button: Disabled
-└──────────────┘
-       │
-       ├─ Success ─→ ┌──────────────┐
-       │             │   COMPLETE   │  Status: "Processing complete!"
-       │             │              │  Button: Enabled
-       │             └──────────────┘
-       │                    │
-       │                    │ Show results dialog
-       │                    ↓
-       │             ┌──────────────┐
-       │             │   RESULTS    │  Dialog: Score, percentage, status
-       │             │              │  Options: [Scan Again] [Done]
-       │             └──────────────┘
-       │                    │
-       │                    ├─ Scan Again ─→ [READY]
-       │                    └─ Done ────────→ [EXIT]
-       │
-       └─ Error ───→ ┌──────────────┐
-                     │    ERROR     │  Status: "Error: [message]"
-                     │              │  Button: Enabled
-                     └──────────────┘
-                            │
-                            │ User retries
-                            ↓
-                         [READY]
-```
-
----
-
-## 🎯 Summary
-
-This complete flow ensures:
-
-1. ✅ **Mobile app captures image** → saves locally
-2. ✅ **Image uploads to web system**
-3. ✅ **Web system checks** (scans bubbles, extracts student info, calculates score)
-4. ✅ **Web system records** (stores image, answers, student data, and scores in database)
-5. ✅ **Results sent back to mobile app** for display
-
-**All processing happens on the server!** 🎉
+- Entry: `apps/api/services/ai-omr/aiOmrService.js` → `runAiOmrScan()`
+- Provider: `providers/geminiProvider.js` (default) or `providers/ollamaProvider.js`
+- Layouts: `.runtime/data/omr-layouts/*.json`
+- Settings: `.runtime/data/ai-omr/settings.json` (admin UI) or `AI_OMR_*` env vars
+- Dashboard: `apps/web/index4.html` → Scan workspace, Systems → AI OMR settings
+- Current-state reference: `docs/active/SYSTEM_CURRENT_STATE_DETAILED.md`

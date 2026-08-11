@@ -99,6 +99,12 @@ app.use((req, res, next) => {
     next();
 });
 
+app.use('/vendor/bootstrap', express.static(path.join(paths.apiRoot, 'node_modules', 'bootstrap', 'dist')));
+app.use('/vendor/fontawesome', express.static(path.join(paths.apiRoot, 'node_modules', '@fortawesome', 'fontawesome-free')));
+app.use('/vendor/jsbarcode', express.static(path.join(paths.apiRoot, 'node_modules', 'jsbarcode', 'dist')));
+app.use('/vendor/exceljs', express.static(path.join(paths.apiRoot, 'node_modules', 'exceljs', 'dist')));
+app.use('/vendor/chart.js', express.static(path.join(paths.apiRoot, 'node_modules', 'chart.js', 'dist')));
+app.use('/vendor/html2canvas', express.static(path.join(paths.apiRoot, 'node_modules', 'html2canvas', 'dist')));
 app.use(express.static(paths.webRoot, { index: false }));
 app.use('/uploads', express.static(paths.uploadsDir));
 
@@ -109,8 +115,8 @@ app.get('/', (req, res) => {
 });
 
 console.log('Starting database initialization...');
-console.log('Generated Layout OMR Mode Enabled');
-console.log('Legacy OMR Fallback Disabled');
+console.log('AI Vision Scanner Mode Enabled');
+console.log('Legacy deterministic OMR product path disabled');
 
 let server; // Keep reference for graceful shutdown
 

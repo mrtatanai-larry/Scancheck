@@ -163,12 +163,19 @@ class ScanCheckConfig {
                 }
 
                 let detail = bodyText;
+                let parsedPayload = null;
                 try {
-                    const parsed = JSON.parse(bodyText);
-                    if (parsed && parsed.error) detail = parsed.error;
+                    parsedPayload = JSON.parse(bodyText);
+                    if (parsedPayload && parsedPayload.error) detail = parsedPayload.error;
                 } catch (e) {}
 
-                throw new Error(`HTTP ${response.status}: ${detail || response.statusText}`);
+                const apiError = new Error(`HTTP ${response.status}: ${detail || response.statusText}`);
+                apiError.status = response.status;
+                apiError.statusCode = response.status;
+                if (parsedPayload?.code) apiError.code = parsedPayload.code;
+                if (parsedPayload) apiError.payload = parsedPayload;
+                if (parsedPayload?.details) apiError.details = parsedPayload.details;
+                throw apiError;
             }
 
             if (response.status === 204 || response.headers.get('content-length') === '0') {

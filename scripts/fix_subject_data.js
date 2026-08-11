@@ -29,14 +29,14 @@ async function fix() {
         console.log(`Found ${multiScans.length} multi-subject scans.`);
 
         const subjectBoundaries = {
-            MATH: { start: 0, end: 19 },
-            ENG: { start: 20, end: 39 },
-            SCI: { start: 40, end: 59 },
-            SOC: { start: 60, end: 79 },
-            FIL: { start: 80, end: 99 }
+            ENG: { start: 0, end: 19 },
+            SCI: { start: 20, end: 39 },
+            MATH: { start: 40, end: 59 },
+            GEN: { start: 60, end: 79 },
+            ABS: { start: 80, end: 99 }
         };
 
-        const subjectCodes = ['MATH', 'ENG', 'SCI', 'SOC', 'FIL'];
+        const subjectCodes = ['ENG', 'SCI', 'MATH', 'GEN', 'ABS'];
 
         for (const scan of multiScans) {
             console.log(`- Processing 100-q scan ID: ${scan.id} (${scan.student_name})`);
@@ -125,29 +125,29 @@ async function fix() {
                     math_score = ?, math_percentage = ?, math_status = ?,
                     english_score = ?, english_percentage = ?, english_status = ?,
                     science_score = ?, science_percentage = ?, science_status = ?,
-                    social_score = ?, social_percentage = ?, social_status = ?,
-                    filipino_score = ?, filipino_percentage = ?, filipino_status = ?,
+                    general_score = ?, general_percentage = ?, general_status = ?,
+                    abstract_score = ?, abstract_percentage = ?, abstract_status = ?,
                     subject_scores = ?, score_breakdown = ?
                 WHERE id = ?`,
                 [
                     subjectResults.MATH.score, subjectResults.MATH.percentage, parseFloat(subjectResults.MATH.percentage) >= 75 ? 'PASS' : 'FAIL',
                     subjectResults.ENG.score, subjectResults.ENG.percentage, parseFloat(subjectResults.ENG.percentage) >= 75 ? 'PASS' : 'FAIL',
                     subjectResults.SCI.score, subjectResults.SCI.percentage, parseFloat(subjectResults.SCI.percentage) >= 75 ? 'PASS' : 'FAIL',
-                    subjectResults.SOC.score, subjectResults.SOC.percentage, parseFloat(subjectResults.SOC.percentage) >= 75 ? 'PASS' : 'FAIL',
-                    subjectResults.FIL.score, subjectResults.FIL.percentage, parseFloat(subjectResults.FIL.percentage) >= 75 ? 'PASS' : 'FAIL',
+                    subjectResults.GEN.score, subjectResults.GEN.percentage, parseFloat(subjectResults.GEN.percentage) >= 75 ? 'PASS' : 'FAIL',
+                    subjectResults.ABS.score, subjectResults.ABS.percentage, parseFloat(subjectResults.ABS.percentage) >= 75 ? 'PASS' : 'FAIL',
                     JSON.stringify({
-                        MATH: subjectResults.MATH.percentage,
                         ENG: subjectResults.ENG.percentage,
                         SCI: subjectResults.SCI.percentage,
-                        SOC: subjectResults.SOC.percentage,
-                        FIL: subjectResults.FIL.percentage
+                        MATH: subjectResults.MATH.percentage,
+                        GEN: subjectResults.GEN.percentage,
+                        ABS: subjectResults.ABS.percentage
                     }),
                     JSON.stringify({
-                        MATH: subjectResults.MATH.score,
                         ENG: subjectResults.ENG.score,
                         SCI: subjectResults.SCI.score,
-                        SOC: subjectResults.SOC.score,
-                        FIL: subjectResults.FIL.score
+                        MATH: subjectResults.MATH.score,
+                        GEN: subjectResults.GEN.score,
+                        ABS: subjectResults.ABS.score
                     }),
                     scan.id
                 ]
@@ -207,8 +207,8 @@ async function fix() {
             if (subCode.includes('math')) fieldPrefix = 'math';
             else if (subCode.includes('english') || subCode.includes('eng')) fieldPrefix = 'english';
             else if (subCode.includes('science') || subCode.includes('sci')) fieldPrefix = 'science';
-            else if (subCode.includes('social') || subCode.includes('soc')) fieldPrefix = 'social';
-            else if (subCode.includes('filipino') || subCode.includes('fil')) fieldPrefix = 'filipino';
+            else if (subCode.includes('general') || subCode.includes('gen')) fieldPrefix = 'general';
+            else if (subCode.includes('abstract') || subCode.includes('abs')) fieldPrefix = 'abstract';
 
             if (fieldPrefix) {
                 await run(

@@ -4,27 +4,23 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ScanCheck - OMR Scanner System</title>
-    
-    <!-- App Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    
+    <link rel="icon" type="image/svg+xml" href="logo/favicon.svg">
+
     <!-- Bootstrap CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    
+    <link href="/vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/vendor/fontawesome/css/all.min.css" rel="stylesheet">
+
     <!-- Custom CSS -->
     <link href="css/styles.css" rel="stylesheet">
-    
+
     <!-- QR/Barcode Library -->
-    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
-    
+    <script src="/vendor/jsbarcode/JsBarcode.all.min.js"></script>
+
     <!-- Excel Library for Import/Export -->
-    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-    
+    <script src="/vendor/exceljs/exceljs.min.js"></script>
+
     <!-- Chart.js for Graphs -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="/vendor/chart.js/chart.umd.js"></script>
 </head>
 <body>
     <div id="mobileAccessBlock" class="mobile-access-block d-none">
@@ -46,7 +42,7 @@
         <aside class="app-sidebar no-print" id="appSidebar">
             <div class="app-sidebar-brand">
                 <a class="app-brand-link" href="#/dashboard" title="ScanCheck">
-                    <img src="logo/ScanCheck.png" alt="ScanCheck" style="width: 40px; height: 40px; object-fit: contain;">
+                    <img src="logo/qr-code.svg" alt="ScanCheck" style="width: 40px; height: 40px; object-fit: contain;">
                     <span>Scan<span>Check</span></span>
                 </a>
             </div>
@@ -84,7 +80,7 @@
             <div class="modal-content auth-modal-content">
                 <div class="auth-header">
                     <div class="auth-logo">
-                        <img src="logo/ScanCheck.png" alt="ScanCheck Logo" style="width: 100%; height: 100%; object-fit: contain;">
+                        <img src="logo/qr-code-white.svg" alt="ScanCheck Logo" style="width: 100%; height: 100%; object-fit: contain;">
                     </div>
                     <h5 class="modal-title">Welcome to ScanCheck</h5>
                     <div class="modal-subtitle">Modern OMR Grading & Management System</div>
@@ -287,7 +283,7 @@
                         <h5 class="mb-0">Recent Scans</h5>
                         <a href="#/records" class="btn btn-sm btn-link text-decoration-none">View All</a>
                     </div>
-                    <div class="card-body p-0" id="recentScansContainer"> 
+                    <div class="card-body p-0" id="recentScansContainer">
                         <div id="recentScansList" class="list-group list-group-flush">
                             <div class="empty-state">
                                 <i class="fas fa-camera-retro empty-state-icon"></i>
@@ -335,21 +331,6 @@
                         </button>
                     </div>
                 </div>
-
-                <div class="accordion mt-3 no-print" id="brandingAccordion">
-                    <div class="accordion-item border rounded shadow-none">
-                        <h2 class="accordion-header">
-                            <button class="accordion-button collapsed py-2 px-3 fw-bold small" type="button" data-bs-toggle="collapse" data-bs-target="#collapseBranding">
-                                <i class="fas fa-building me-2 text-primary"></i> Department Branding
-                            </button>
-                        </h2>
-                        <div id="collapseBranding" class="accordion-collapse collapse" data-bs-parent="#brandingAccordion">
-                            <div class="accordion-body p-3">
-                                <div id="departmentButtons" class="row row-cols-2 row-cols-sm-3 row-cols-md-4 row-cols-lg-6 g-2"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
             </div>
         </div>
 
@@ -386,15 +367,15 @@
                                 <label class="form-label small fw-bold text-muted text-uppercase">Course</label>
                                 <select id="qrCourse" class="form-select">
                                     <option value="">Select Course</option>
-                                    <option value="BSIT">BSIT</option>
-                                    <option value="BSHM">BSHM</option>
-                                    <option value="BSED">BSED</option>
-                                    <option value="BEED">BEED</option>
-                                    <option value="BSCRIM">BSCRIM</option>
-                                    <option value="BSBA">BSBA</option>
+                                    <option value="Bachelor of Science in Information Technology">Bachelor of Science in Information Technology</option>
+                                    <option value="Bachelor of Science in Hospitality Management">Bachelor of Science in Hospitality Management</option>
+                                    <option value="Bachelor of Secondary Education">Bachelor of Secondary Education</option>
+                                    <option value="Bachelor of Elementary Education">Bachelor of Elementary Education</option>
+                                    <option value="Bachelor of Science in Criminology">Bachelor of Science in Criminology</option>
+                                    <option value="Bachelor of Science in Business Administration">Bachelor of Science in Business Administration</option>
                                 </select>
                             </div>
-                            
+
                             <div class="p-3 mb-4 border rounded bg-light small">
                                 <div class="fw-bold text-uppercase text-muted mb-2">Generated Details</div>
                                 <div class="d-flex justify-content-between mb-1">
@@ -620,9 +601,17 @@
         <div class="row g-4">
             <!-- Left: Image Preview Area -->
             <div class="col-lg-8 col-xl-9">
-                <div class="card shadow-sm border-0 h-100 d-flex flex-column overflow-hidden">
+                <div class="card shadow-sm border-0 h-100 d-flex flex-column overflow-hidden scanner-preview-card">
                     <div class="card-header bg-white d-flex justify-content-between align-items-center">
-                        <h6 class="mb-0">Image Preview</h6>
+                        <div>
+                            <h6 class="mb-0">Image Preview</h6>
+                            <div class="small text-muted">Scroll to zoom, drag to inspect the sheet.</div>
+                        </div>
+                        <div class="scanner-preview-tabs btn-group btn-group-sm" role="group" aria-label="Preview mode">
+                            <button type="button" id="scannerPreviewTabOriginal" class="btn btn-primary" onclick="app.setScannerPreviewMode('original')">Original</button>
+                            <button type="button" id="scannerPreviewTabAiInput" class="btn btn-outline-primary" onclick="app.setScannerPreviewMode('aiInput')" disabled>AI Input</button>
+                            <button type="button" id="scannerPreviewTabResults" class="btn btn-outline-primary" onclick="app.setScannerPreviewMode('results')" disabled>Results</button>
+                        </div>
                         <div id="scannerQueueHeader" class="d-none align-items-center gap-2 overflow-hidden" style="max-width: 50%;">
                             <div id="scannerThumbnails" class="d-flex gap-1 overflow-auto py-1" style="scrollbar-width: none;"></div>
                         </div>
@@ -636,12 +625,12 @@
                             </button>
                         </div>
                     </div>
-                    <div class="card-body bg-light p-0 position-relative d-flex align-items-center justify-content-center overflow-auto flex-grow-1" id="scannerImagePreviewShell">
-                        <div id="scannerImagePreview" class="p-4 w-100 h-100 d-flex align-items-center justify-content-center">
+                    <div class="card-body bg-light p-0 position-relative d-flex align-items-center justify-content-center flex-grow-1 scanner-preview-shell" id="scannerImagePreviewShell">
+                        <div id="scannerImagePreview" class="scanner-preview-canvas">
                             <div class="empty-state">
                                 <i class="fas fa-file-image empty-state-icon"></i>
                                 <h6 class="empty-state-title">No image uploaded</h6>
-                                <p class="empty-state-description small">Upload a clear photo of the answer sheet to start scanning.</p>
+                                <p class="empty-state-description small">Upload a clear photo of the answer sheet to start AI scanning.</p>
                             </div>
                         </div>
 
@@ -649,10 +638,12 @@
                         <div id="scannerImageControls" class="position-absolute bottom-0 start-0 w-100 p-3 d-none">
                             <div class="d-flex justify-content-center">
                                 <div class="btn-group shadow-sm bg-white p-1 rounded-pill">
-                                    <button class="btn btn-light btn-sm rounded-circle mx-1" onclick="app.rotateImage(-90)"><i class="fas fa-undo"></i></button>
-                                    <button class="btn btn-light btn-sm rounded-circle mx-1" onclick="app.rotateImage(90)"><i class="fas fa-redo"></i></button>
-                                    <button class="btn btn-light btn-sm rounded-circle mx-1" onclick="app.zoomImage(1.2)"><i class="fas fa-search-plus"></i></button>
-                                    <button class="btn btn-light btn-sm rounded-circle mx-1" onclick="app.zoomImage(0.8)"><i class="fas fa-search-minus"></i></button>
+                                    <button class="btn btn-light btn-sm rounded-circle mx-1" title="Rotate left" onclick="app.rotateImage(-90)"><i class="fas fa-undo"></i></button>
+                                    <button class="btn btn-light btn-sm rounded-circle mx-1" title="Rotate right" onclick="app.rotateImage(90)"><i class="fas fa-redo"></i></button>
+                                    <button class="btn btn-light btn-sm rounded-circle mx-1" title="Zoom in" onclick="app.zoomImage(1.2)"><i class="fas fa-search-plus"></i></button>
+                                    <button class="btn btn-light btn-sm rounded-circle mx-1" title="Zoom out" onclick="app.zoomImage(0.8)"><i class="fas fa-search-minus"></i></button>
+                                    <button class="btn btn-light btn-sm rounded-circle mx-1" title="Fit image" onclick="app.fitScannerPreviewImage()"><i class="fas fa-compress-arrows-alt"></i></button>
+                                    <span id="scannerZoomLevel" class="scanner-zoom-level">100%</span>
                                 </div>
                             </div>
                         </div>
@@ -660,9 +651,12 @@
                         <!-- Scanning Overlay -->
                         <div id="scannerOverlay" class="position-absolute top-0 start-0 w-100 h-100 bg-white bg-opacity-75 d-none flex-column align-items-center justify-content-center" style="z-index: 10;">
                             <div class="spinner-border text-primary mb-3" role="status"></div>
-                            <h6 class="fw-bold text-primary">Scanning Sheet...</h6>
-                            <div class="progress w-50" style="height: 6px;">
-                                <div id="scanningProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%"></div>
+                            <h6 class="fw-bold text-primary mb-3">Scanning Paper...</h6>
+                            <div class="scanner-stage-list">
+                                <div class="scanner-stage-row" data-stage="prepare"><i class="fas fa-circle-notch"></i><span>Preparing paper</span></div>
+                                <div class="scanner-stage-row" data-stage="layout"><i class="far fa-circle"></i><span>Reading layout</span></div>
+                                <div class="scanner-stage-row" data-stage="analyze"><i class="far fa-circle"></i><span>Analyzing answers</span></div>
+                                <div class="scanner-stage-row" data-stage="validate"><i class="far fa-circle"></i><span>Validating result</span></div>
                             </div>
                         </div>
                     </div>
@@ -676,14 +670,26 @@
                         <h6 class="mb-0">Scan Controls</h6>
                     </div>
                     <div class="card-body">
+                        <div class="scanner-ai-status mb-3">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="small fw-bold text-muted text-uppercase">AI Vision Scanner</span>
+                                <span id="scannerAiStatusBadge" class="badge bg-success">Ready</span>
+                            </div>
+                        </div>
                         <div class="mb-4">
                             <label class="form-label small fw-bold text-muted text-uppercase">Target Exam</label>
+                            <div id="scannerDetectedExamCard" class="scanner-detected-exam d-none mb-2">
+                                <div class="fw-bold" id="scannerDetectedExamName">-</div>
+                                <div class="small text-muted"><span id="scannerDetectedQuestionCount">-</span> Questions</div>
+                                <div class="small text-success fw-semibold mt-1"><i class="fas fa-check-circle me-1"></i><span id="scannerDetectedSource">Detected from QR</span></div>
+                            </div>
+                            <label class="form-label small fw-bold text-muted text-uppercase mb-1" id="scannerManualOverrideLabel">Manual Override</label>
                             <select id="scannerExamSelect" class="form-select"></select>
-                            <div class="form-text small">Select the exam layout for processing.</div>
+                            <div class="form-text small" id="scannerExamHelpText">Used when QR/layout detection needs manual confirmation.</div>
                         </div>
 
                         <button id="startScanBtn" class="btn btn-primary w-100 btn-lg mb-3" onclick="app.startScannerOCR()" disabled>
-                            <i class="fas fa-search me-2"></i> Scan Sheet
+                            <i class="fas fa-search me-2"></i> Scan Paper
                         </button>
 
                         <div id="bulkScanPanel" class="bulk-scan-panel d-none mb-3">
@@ -714,41 +720,52 @@
                     <div class="card-body p-3">
                         <div class="list-group list-group-flush small">
                             <div class="list-group-item d-flex justify-content-between px-0">
-                                <span class="text-muted">Exam ID:</span>
+                                <span class="text-muted">Exam:</span>
                                 <strong id="scannerMetaExamId">-</strong>
                             </div>
                             <div class="list-group-item d-flex justify-content-between px-0">
-                                <span class="text-muted">Score:</span>
-                                <strong id="scannerMetaScore">-</strong>
+                                <span class="text-muted">Questions Read:</span>
+                                <strong id="scannerMetaQuestionsRead">-</strong>
                             </div>
                             <div class="list-group-item d-flex justify-content-between px-0">
-                                <span class="text-muted">Confidence:</span>
-                                <strong id="scannerMetaBubbles">-</strong>
+                                <span class="text-muted">Needs Review:</span>
+                                <strong id="scannerMetaNeedsReview">-</strong>
                             </div>
                             <div class="list-group-item d-flex justify-content-between px-0">
-                                <span class="text-muted">Worker:</span>
+                                <span class="text-muted">Status:</span>
+                                <strong id="scannerMetaScanStatus">-</strong>
+                            </div>
+                            <div class="list-group-item d-flex justify-content-between px-0">
+                                <span class="text-muted">Processing Time:</span>
+                                <strong id="scannerMetaProcessingTime">-</strong>
+                            </div>
+                            <div class="list-group-item d-flex justify-content-between px-0">
+                                <span class="text-muted">Scanner:</span>
                                 <strong id="scannerMetaWorkerUsed">-</strong>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Operator Tips (Scanner Only) -->
                 <div class="card shadow-sm border-0 bg-primary bg-opacity-10 mt-4">
-                    <div class="card-body">
-                        <h6 class="fw-bold small mb-2 text-primary"><i class="fas fa-info-circle me-2"></i> Operator Tips</h6>
+                    <button class="card-header bg-transparent border-0 w-100 text-start d-flex justify-content-between align-items-center" type="button" data-bs-toggle="collapse" data-bs-target="#scannerTipsBody" aria-expanded="false" aria-controls="scannerTipsBody">
+                        <h6 class="fw-bold small mb-0 text-primary"><i class="fas fa-info-circle me-2"></i> Scanning Tips</h6>
+                        <i class="fas fa-chevron-down text-primary small"></i>
+                    </button>
+                    <div id="scannerTipsBody" class="collapse">
+                        <div class="card-body pt-0">
                         <ul class="small text-muted mb-0 ps-3">
                             <li>Keep sheet flat and fully visible in frame.</li>
                             <li>Avoid glare and dark shadows across bubbles.</li>
-                            <li>Use dark, full bubble shading for reliable detection.</li>
+                            <li>Use dark, full bubble shading so AI can clearly see marks.</li>
                             <li>Generated sheets must have a readable QR examId and saved layout.</li>
-                            <li>If you see <strong>"Layout not found"</strong>, the scanned paper was generated from another system/runtime. Regenerate a new answer sheet on this computer or restore the missing layout JSON.</li>
-                            <li>Use Advanced Debug only when troubleshooting bubble alignment.</li>
+                            <li>Use ScanCheck-generated sheets for reliable layout detection.</li>
                         </ul>
                         <div class="mt-3 pt-2 border-top border-primary border-opacity-25">
                             <a href="#/exam" class="btn btn-primary btn-sm w-100">
                                 <i class="fas fa-plus-circle me-1"></i> Generate New Answer Sheet
                             </a>
+                        </div>
                         </div>
                     </div>
                 </div>
@@ -798,44 +815,32 @@
                                 <div class="row g-3">
                                     <div class="col-12">
                                         <label class="form-label small text-muted">Full Name</label>
-                                        <input type="text" id="ocrStudentName" class="form-control" placeholder="Not detected">
+                                        <input type="text" id="ocrStudentName" class="form-control" placeholder="Not detected" readonly>
                                     </div>
                                     <input type="hidden" id="ocrPaperId">
                                     <div class="col-6">
-                                        <label class="form-label small text-muted">Student ID</label>
-                                        <input type="text" id="ocrStudentId" class="form-control" placeholder="Pending">
-                                    </div>
-                                    <div class="col-6">
                                         <label class="form-label small text-muted">Age</label>
-                                        <input type="number" id="ocrStudentAge" class="form-control" placeholder="0">
+                                        <input type="number" id="ocrStudentAge" class="form-control" placeholder="0" readonly>
                                     </div>
                                     <div class="col-12">
                                         <label class="form-label small text-muted">Course</label>
-                                        <select id="ocrStudentCourse" class="form-select">
-                                            <option value="">Select Course</option>
-                                            <option value="Bachelor of Science in Information Technology">Bachelor of Science in Information Technology</option>
-                                            <option value="Bachelor of Science in Hospitality Management">Bachelor of Science in Hospitality Management</option>
-                                            <option value="Bachelor of Secondary Education">Bachelor of Secondary Education</option>
-                                            <option value="Bachelor of Elementary Education">Bachelor of Elementary Education</option>
-                                            <option value="Bachelor of Science in Criminology">Bachelor of Science in Criminology</option>
-                                            <option value="Bachelor of Science in Business Administration">Bachelor of Science in Business Administration</option>
-                                        </select>
+                                        <input type="text" id="ocrStudentCourse" class="form-control" placeholder="Not detected" readonly>
                                     </div>
                                     <div class="col-6">
                                         <label class="form-label small text-muted">Room No.</label>
-                                        <input type="text" id="ocrRoomNo" class="form-control">
+                                        <input type="text" id="ocrRoomNo" class="form-control" readonly>
                                     </div>
                                     <div class="col-6">
                                         <label class="form-label small text-muted">Seat No.</label>
-                                        <input type="text" id="ocrSeatNo" class="form-control">
+                                        <input type="text" id="ocrSeatNo" class="form-control" readonly>
                                     </div>
                                     <div class="col-12">
                                         <label class="form-label small text-muted">Score</label>
-                                        <input type="number" id="ocrScore" class="form-control fw-bold text-primary">
+                                        <input type="number" id="ocrScore" class="form-control fw-bold text-primary" readonly>
                                     </div>
                                     <div class="col-12">
                                         <label class="form-label small text-muted">Date & Time</label>
-                                        <input type="text" id="ocrDateTime" class="form-control">
+                                        <input type="text" id="ocrDateTime" class="form-control" readonly>
                                     </div>
                                 </div>
                             </div>
@@ -844,29 +849,21 @@
                             <div class="p-4 border-bottom">
                                 <h6 class="text-muted small fw-bold text-uppercase mb-3"><i class="fas fa-tags me-2"></i> Classification</h6>
                                 <div class="row g-3">
-                                    <div class="col-md-4">
+                                    <div class="col-md-3">
+                                        <label class="form-label small text-muted">Sex</label>
+                                        <input type="text" id="ocrSex" class="form-control form-control-sm" readonly>
+                                    </div>
+                                    <div class="col-md-3">
                                         <label class="form-label small text-muted">Entry Type</label>
-                                        <select id="ocrEntryType" class="form-select form-select-sm">
-                                            <option value="New Student">New Student</option>
-                                            <option value="Transferee">Transferee</option>
-                                        </select>
+                                        <input type="text" id="ocrEntryType" class="form-control form-control-sm" readonly>
                                     </div>
-                                    <div class="col-md-4">
+                                    <div class="col-md-3">
                                         <label class="form-label small text-muted">Residency</label>
-                                        <select id="ocrResidencyType" class="form-select form-select-sm">
-                                            <option value="Passinhon">Passinhon</option>
-                                            <option value="Non-Passinhon">Non-Passinhon</option>
-                                        </select>
+                                        <input type="text" id="ocrResidencyType" class="form-control form-control-sm" readonly>
                                     </div>
-                                    <div class="col-md-4">
+                                    <div class="col-md-3">
                                         <label class="form-label small text-muted">Equity Group</label>
-                                        <select id="ocrEquityGroup" class="form-select form-select-sm">
-                                            <option value="None">None</option>
-                                            <option value="PWDs">PWDs</option>
-                                            <option value="IPs">IPs</option>
-                                            <option value="Solo Parent">Solo Parent</option>
-                                            <option value="Magna Carta">Magna Carta</option>
-                                        </select>
+                                        <input type="text" id="ocrEquityGroup" class="form-control form-control-sm" readonly>
                                     </div>
                                 </div>
                             </div>
@@ -877,7 +874,7 @@
                                 <div class="list-group list-group-flush small">
                                     <div class="list-group-item d-flex justify-content-between px-0 bg-transparent">
                                         <span class="text-muted">QR Verification</span>
-                                        <div id="qrStatusBadge"><span class="badge bg-secondary">OMR Only</span></div>
+                                        <div id="qrStatusBadge"><span class="badge bg-secondary">Selected Layout</span></div>
                                     </div>
                                     <div class="list-group-item d-flex justify-content-between px-0 bg-transparent">
                                         <span class="text-muted">Scan Quality</span>
@@ -889,7 +886,7 @@
                                     </div>
                                 </div>
                                 <div id="ocrAlignmentWarning" class="alert alert-warning small mt-3 mb-0 d-none">
-                                    Alignment quality is low. Review yellow answers.
+                                    Scan quality is low. Some answers may need manual checking.
                                 </div>
                                 <div class="mt-3">
                                     <button id="ocrRawTextToggleBtn" class="btn btn-link btn-sm text-decoration-none p-0" onclick="app.toggleRawText()">Show Raw Data</button>
@@ -906,10 +903,9 @@
                                     <div class="d-flex gap-3 small text-muted">
                                         <span><i class="fas fa-circle text-success me-1"></i> Correct</span>
                                         <span><i class="fas fa-circle text-danger me-1"></i> Wrong</span>
-                                        <span><i class="fas fa-circle text-warning me-1"></i> Review</span>
                                     </div>
                                 </div>
-                                
+
                                 <div id="ocrAnswersList" class="bg-white rounded border p-4 shadow-sm">
                                     <!-- Populated by JS -->
                                 </div>
@@ -1018,8 +1014,102 @@
                 <p class="app-page-subtitle">Analyze examination results and student performance trends.</p>
             </div>
         </div>
-        
+
+        <!-- Report Filters -->
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-body py-3">
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-2">
+                        <label class="form-label small text-muted mb-1">Exam</label>
+                        <select id="reportQuizFilter" class="form-select form-select-sm">
+                            <option value="">All Exams</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small text-muted mb-1">Date From</label>
+                        <input type="date" id="reportDateFrom" class="form-control form-control-sm">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small text-muted mb-1">Date To</label>
+                        <input type="date" id="reportDateTo" class="form-control form-control-sm">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small text-muted mb-1">Entry Type</label>
+                        <select id="reportEntryFilter" class="form-select form-select-sm">
+                            <option value="">All Entry Types</option>
+                            <option value="New Student">New Student</option>
+                            <option value="Transferee">Transferee</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small text-muted mb-1">Equity Group</label>
+                        <select id="reportEquityFilter" class="form-select form-select-sm">
+                            <option value="">All Equity Groups</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small text-muted mb-1">Sort Ranking</label>
+                        <select id="reportRankingSort" class="form-select form-select-sm">
+                            <option value="rank">By Rank</option>
+                            <option value="alpha">Alphabetical</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small text-muted mb-1">Subject</label>
+                        <select id="reportSubjectSelect" class="form-select form-select-sm">
+                            <option value="">All Subjects</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small text-muted mb-1">Min Score %</label>
+                        <input type="number" id="reportMinScore" class="form-control form-control-sm" min="0" max="100" placeholder="e.g. 75">
+                    </div>
+                    <div class="col-md-2 d-flex gap-2">
+                        <button class="btn btn-primary btn-sm flex-grow-1" onclick="app.refreshReports()">
+                            <i class="fas fa-sync-alt me-1"></i> Apply
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="app.resetReportFilters()" title="Reset filters">
+                            <i class="fas fa-undo"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Report Summary Stats -->
+        <div class="row g-3 mb-4">
+            <div class="col-6 col-md-3">
+                <div class="summary-card bg-white shadow-sm border">
+                    <h6 class="text-muted">Total Students</h6>
+                    <h2 id="reportTotalStudents">0</h2>
+                    <i class="fas fa-users position-absolute opacity-10" style="font-size: 48px; right: 16px; bottom: 16px;"></i>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="summary-card bg-white shadow-sm border">
+                    <h6 class="text-muted">Pass Rate</h6>
+                    <h2 id="reportPassRate">0%</h2>
+                    <i class="fas fa-check-circle position-absolute opacity-10" style="font-size: 48px; right: 16px; bottom: 16px;"></i>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="summary-card bg-white shadow-sm border">
+                    <h6 class="text-muted">Average Score</h6>
+                    <h2 id="reportAvgScore">0%</h2>
+                    <i class="fas fa-chart-line position-absolute opacity-10" style="font-size: 48px; right: 16px; bottom: 16px;"></i>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="summary-card bg-white shadow-sm border">
+                    <h6 class="text-muted">Total Exams</h6>
+                    <h2 id="reportTotalExams">0</h2>
+                    <i class="fas fa-file-alt position-absolute opacity-10" style="font-size: 48px; right: 16px; bottom: 16px;"></i>
+                </div>
+            </div>
+        </div>
+
         <div id="scoreReport" class="mt-4"></div>
+        <div id="subjectReport" class="mt-4"></div>
     </div>
 
     <!-- Systems Page -->
@@ -1057,7 +1147,7 @@
                             <div class="col-md-4">
                                 <div class="p-4 border rounded-4 bg-light bg-opacity-50 h-100">
                                     <h6 class="fw-bold mb-3 d-flex align-items-center">
-                                        <i class="fas fa-cloud-download-alt text-primary me-2"></i> 
+                                        <i class="fas fa-cloud-download-alt text-primary me-2"></i>
                                         Backup System
                                     </h6>
                                     <p class="small text-muted mb-4">Export all examination data, student records, and system configurations to a secure ZIP archive.</p>
@@ -1069,7 +1159,7 @@
                             <div class="col-md-4">
                                 <div class="p-4 border rounded-4 bg-light bg-opacity-50 h-100">
                                     <h6 class="fw-bold mb-3 d-flex align-items-center">
-                                        <i class="fas fa-cloud-upload-alt text-success me-2"></i> 
+                                        <i class="fas fa-cloud-upload-alt text-success me-2"></i>
                                         Upload & Restore
                                     </h6>
                                     <p class="small text-muted mb-4">Upload a backup file from your computer. <strong>Note:</strong> Files over 500MB should use Local Path restore for better reliability.</p>
@@ -1081,7 +1171,7 @@
                             <div class="col-md-4">
                                 <div class="p-4 border rounded-4 bg-light bg-opacity-50 h-100">
                                     <h6 class="fw-bold mb-3 d-flex align-items-center">
-                                        <i class="fas fa-hdd text-info me-2"></i> 
+                                        <i class="fas fa-hdd text-info me-2"></i>
                                         Local Path Restore
                                     </h6>
                                     <p class="small text-muted mb-4">Recommended for huge backups (100GB+). Enter the absolute path of a ZIP file already on the server.</p>
@@ -1096,7 +1186,7 @@
                         </div>
 
                         <input type="file" id="systemBackupFileInput" accept=".zip,application/zip" class="d-none">
-                        
+
                         <div class="mt-4 p-3 border rounded-4 bg-white shadow-sm d-none" id="restoreActionPanel">
                             <div class="d-flex align-items-center justify-content-between">
                                 <div class="d-flex align-items-center">
@@ -1130,6 +1220,182 @@
                     </div>
                 </div>
 
+                <div class="card shadow-sm border-0 mb-4 overflow-hidden">
+                    <div class="card-header bg-white py-3 border-bottom">
+                        <div class="d-flex align-items-center">
+                            <div class="settings-icon-box bg-success bg-opacity-10 text-success me-3">
+                                <i class="fas fa-robot"></i>
+                            </div>
+                            <div>
+                                <h5 class="mb-0 fw-bold">AI Vision Scanner</h5>
+                                <p class="text-muted small mb-0">Production answer reader</p>
+                            </div>
+                            <span id="aiOmrConnectionBadge" class="badge bg-secondary ms-auto">Checking</span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="ai-settings-section">
+                            <div class="ai-section-title">Status</div>
+                            <div class="row g-3">
+                                <div class="col-md-4">
+                                    <div class="ai-status-tile">
+                                        <span class="text-muted">Provider</span>
+                                        <strong id="aiOmrProviderText">Gemini</strong>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="ai-status-tile">
+                                        <span class="text-muted">Production Scanner</span>
+                                        <strong id="aiOmrProductionScannerText">AI Vision</strong>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="ai-status-tile">
+                                        <span class="text-muted">Connection</span>
+                                        <strong id="aiOmrStatusText">Not checked</strong>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="ai-settings-section">
+                            <div class="ai-section-title">Basic Settings</div>
+                            <div class="row g-3">
+                                <div class="col-md-4">
+                                    <label class="form-label small fw-bold text-uppercase text-muted">Scanning Strategy</label>
+                                    <select id="aiOmrStrategy" class="form-select">
+                                        <option value="auto">Auto - Recommended</option>
+                                        <option value="fast">Fast</option>
+                                        <option value="high_accuracy">High Accuracy</option>
+                                        <option value="custom">Custom</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label small fw-bold text-uppercase text-muted">Image Detail</label>
+                                    <select id="aiOmrImageDetail" class="form-select">
+                                        <option value="low">Low</option>
+                                        <option value="medium">Medium - Recommended</option>
+                                        <option value="high">High</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label small fw-bold text-uppercase text-muted">Verification</label>
+                                    <select id="aiOmrVerificationMode" class="form-select">
+                                        <option value="uncertain">Uncertain answers only</option>
+                                        <option value="always">Always verify</option>
+                                        <option value="disabled">Disabled</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="ai-settings-section">
+                            <div class="ai-section-title">API Connection</div>
+                            <div class="row g-3 align-items-end">
+                                <div class="col-lg-7">
+                                    <label class="form-label small fw-bold text-uppercase text-muted">Gemini API Key</label>
+                                    <div id="aiOmrKeyPreview" class="ai-key-preview">Not configured</div>
+                                    <div class="form-text" id="aiOmrKeyStatus">Key status not loaded.</div>
+                                    <div id="aiOmrKeyInputGroup" class="input-group mt-2 d-none">
+                                        <input type="password" id="aiOmrApiKey" class="form-control" autocomplete="off" placeholder="Paste replacement Gemini API key">
+                                        <button class="btn btn-outline-secondary" type="button" id="aiOmrToggleKeyBtn">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                        <button class="btn btn-outline-secondary" type="button" id="aiOmrCancelReplaceKeyBtn">Cancel</button>
+                                    </div>
+                                </div>
+                                <div class="col-lg-5 d-flex flex-wrap gap-2 justify-content-lg-end">
+                                    <button class="btn btn-outline-primary" id="aiOmrTestConnectionBtn" type="button">
+                                        <i class="fas fa-plug me-1"></i> Test Connection
+                                    </button>
+                                    <button class="btn btn-outline-secondary" id="aiOmrReplaceKeyBtn" type="button">
+                                        <i class="fas fa-key me-1"></i> Replace Key
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="ai-settings-section">
+                            <div class="ai-section-title">Usage</div>
+                            <div class="ai-usage-grid">
+                                <div class="ai-usage-tile"><span>Papers This Month</span><strong id="aiOmrUsageMonthPapers">-</strong></div>
+                                <div class="ai-usage-tile"><span>API Requests</span><strong id="aiOmrUsageRequests">-</strong></div>
+                                <div class="ai-usage-tile"><span>Average Processing</span><strong id="aiOmrUsageAvgProcessing">-</strong></div>
+                                <div class="ai-usage-tile"><span>Total Tokens</span><strong id="aiOmrUsageTokens">-</strong></div>
+                            </div>
+                        </div>
+
+                        <div class="ai-settings-section mb-0">
+                            <button class="btn btn-link px-0 fw-bold text-decoration-none" type="button" data-bs-toggle="collapse" data-bs-target="#aiOmrAdvancedCollapse" aria-expanded="false" aria-controls="aiOmrAdvancedCollapse">
+                                <i class="fas fa-sliders-h me-1"></i> Advanced AI Configuration
+                            </button>
+                            <div id="aiOmrAdvancedCollapse" class="collapse">
+                                <div class="row g-3 align-items-end pt-2">
+                                    <div class="col-md-4 d-none">
+                                        <label class="form-label small fw-bold text-uppercase text-muted">Provider</label>
+                                        <select id="aiOmrProvider" class="form-select">
+                                            <option value="gemini">Gemini</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold text-uppercase text-muted">Model</label>
+                                        <select id="aiOmrModel" class="form-select">
+                                            <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
+                                            <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+                                            <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite</option>
+                                            <option value="gemini-flash-latest">Gemini Flash Latest</option>
+                                            <option value="gemini-flash-lite-latest">Gemini Flash-Lite Latest</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold text-uppercase text-muted">Raw Section Size</label>
+                                        <select id="aiOmrSectionSize" class="form-select">
+                                            <option value="20">20 questions</option>
+                                            <option value="10">10 questions</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold text-uppercase text-muted">Prompt Version</label>
+                                        <input type="text" id="aiOmrPromptVersion" class="form-control" maxlength="80" placeholder="omr-prompt-v1">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold text-uppercase text-muted">Timeout</label>
+                                        <input type="number" min="1000" step="1000" id="aiOmrTimeoutMs" class="form-control" placeholder="30000">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold text-uppercase text-muted">Retries</label>
+                                        <input type="number" min="0" max="5" id="aiOmrMaxRetries" class="form-control" placeholder="2">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold text-uppercase text-muted">Confidence Threshold</label>
+                                        <input type="number" min="0" max="1" step="0.01" id="aiOmrConfidenceThreshold" class="form-control" placeholder="0.75">
+                                    </div>
+                                    <div class="col-12">
+                                        <div class="d-flex justify-content-between align-items-center gap-2">
+                                            <label class="form-label small fw-bold text-uppercase text-muted mb-1">Scanner Prompt</label>
+                                            <button class="btn btn-link btn-sm p-0" id="aiOmrRestorePromptBtn" type="button">Restore Default Prompt</button>
+                                        </div>
+                                        <textarea id="aiOmrInstructionPrompt" class="form-control" rows="5" maxlength="4000" placeholder="AI scanner mark-reading instructions"></textarea>
+                                        <div class="form-text">Do not include answer keys, scores, or student private details.</div>
+                                    </div>
+                                    <div class="col-12 border-top pt-3 d-flex flex-wrap gap-2 align-items-center">
+                                        <span class="small fw-bold text-muted text-uppercase me-auto">Manage API Key</span>
+                                        <button class="btn btn-outline-danger" id="aiOmrRemoveKeyBtn" type="button">
+                                            <i class="fas fa-trash-alt me-1"></i> Remove API Key
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="d-flex justify-content-end mt-4">
+                            <button class="btn btn-primary" id="aiOmrSaveSettingsBtn" type="button">
+                                <i class="fas fa-save me-1"></i> Save Settings
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
 
             </div>
 
@@ -1139,14 +1405,14 @@
                     <div class="card-body p-4 position-relative">
                         <div class="d-flex align-items-center mb-4">
                             <div class="bg-white bg-opacity-20 rounded-circle p-2 me-3" style="width: 80px; height: 80px; display: flex; align-items: center; justify-content: center;">
-                                <img src="images/ScanCheck.png" alt="ScanCheck Logo" style="width: 100%; height: 100%; object-fit: contain; border-radius: 50%;">
+                                <img src="logo/qr-code-white.svg" alt="ScanCheck Logo" style="width: 100%; height: 100%; object-fit: contain; border-radius: 50%;">
                             </div>
                             <div>
                                 <h4 class="fw-bold mb-0">ScanCheck</h4>
                                 <p class="small opacity-75 mb-0">v2.1.0-release</p>
                             </div>
                         </div>
-                        
+
                         <div class="system-status-pill mb-4">
                             <i class="fas fa-check-circle me-2"></i> System is Online
                         </div>
@@ -1155,7 +1421,7 @@
                             <h6 class="small text-uppercase opacity-75 fw-bold mb-3">Development Team</h6>
                             <h3 class="fw-bold mb-1">APEX Group</h3>
                             <p class="small opacity-75 mb-4">Project of PCC BSIT 4th Year</p>
-                            
+
                             <div class="team-leader-badge mb-4">
                                 <div class="badge-icon"><i class="fas fa-crown"></i></div>
                                 <div class="badge-content">
@@ -1245,7 +1511,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <div class="col-lg-7 col-xl-8">
                 <div class="card shadow-sm border-0 h-100 d-flex flex-column">
                     <div class="card-header bg-white">
@@ -1430,19 +1696,19 @@
     </div>
 
     <!-- Scripts -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    
+    <script src="/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+
     <!-- Core Infrastructure Components -->
-    <script src="js/error-handler.js?v=20260525a"></script>
+    <script src="js/error-handler.js?v=20260811-duplicate-record"></script>
     <script src="js/input-validator.js?v=20260525a"></script>
     <script src="js/loading-state-manager.js?v=20260525a"></script>
     <script src="js/toast-manager.js?v=20260525a"></script>
     <script src="js/modal-manager.js?v=20260525a"></script>
-    
+
     <!-- Application Scripts -->
-    <script src="js/config.js?v=20260525b"></script>
-    <script src="js/subject-report.js?v=20260525a"></script>
-    <script src="js/app.js?v=20260607a"></script>
+    <script src="js/config.js?v=20260811-ai-providers"></script>
+    <script src="js/subject-report.js?v=20260808a"></script>
+    <script src="js/app.js?v=20260811-top-fields"></script>
     <script src="js/answer-sheet.js?v=20260528b"></script>
     <script src="js/answer-sheetnormal.js?v=20260610a"></script>
     <!-- Edit Record Modal -->
@@ -1462,7 +1728,7 @@
                                 <input type="text" id="editStudentName" class="form-control" required>
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label small fw-bold">Student ID</label>
+                                <label class="form-label small fw-bold">Sheet ID</label>
                                 <input type="text" id="editStudentId" class="form-control">
                             </div>
                             <div class="col-md-6">

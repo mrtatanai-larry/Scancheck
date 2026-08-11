@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="#ffffff">
+  <path fill-rule="evenodd" d="M0 0h12v12H0zM4 4h4v4H4z"/>
+  <path fill-rule="evenodd" d="M12 0h12v12H12zM16 4h4v4h-4z"/>
+  <path fill-rule="evenodd" d="M0 12h12v12H0zM4 16h4v4H4z"/>
+  <rect x="12" y="12" width="4" height="4"/>
+  <rect x="16" y="16" width="4" height="4"/>
+  <rect x="20" y="20" width="4" height="4"/>
+  <rect x="20" y="12" width="4" height="4"/>
+  <rect x="12" y="20" width="4" height="4"/>
+</svg>

@@ -77,7 +77,19 @@
                         /* ignore */
                     }
                 }
-                requestAnimationFrame(() => window.print());
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        if (window.answerSheetGenerator?.validateLayoutAgainstDom) {
+                            window.answerSheetGenerator.validateLayoutAgainstDom(
+                                mount,
+                                quiz,
+                                window.latestOmrGeneratedLayout,
+                                'print.html'
+                            );
+                        }
+                        window.print();
+                    });
+                });
             } else {
                 document.body.innerHTML = '<h1>Error: No quiz data found to print.</h1>';
             }

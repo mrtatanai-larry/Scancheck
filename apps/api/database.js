@@ -47,7 +47,8 @@ class Database {
                     return;
                 }
                 console.log('Connected to SQLite database');
-                this.assertWritable()
+                this.configurePragmas()
+                    .then(() => this.assertWritable())
                     .then(() => this.createTables())
                     .then(resolve)
                     .catch(reject);
@@ -88,6 +89,21 @@ class Database {
         });
     }
 
+    configurePragmas() {
+        return new Promise((resolve, reject) => {
+            // WAL allows concurrent reads while a write is in progress; busy_timeout
+            // avoids SQLITE_BUSY when overlapping writes occur (e.g. upload vs backup);
+            // foreign_keys enforces the declared FOREIGN KEY constraints.
+            this.db.exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;', (err) => {
+                if (err) {
+                    reject(err);
+                    return;
+                }
+                resolve();
+            });
+        });
+    }
+
     async createTables() {
         try {
             const tableQueries = [
@@ -108,6 +124,7 @@ class Database {
                     format TEXT DEFAULT 'multi-subject',
                     subject_config TEXT,
                     correct_answers TEXT,
+                    archived INTEGER DEFAULT 0,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (subject_id) REFERENCES subjects (id)
                 )`,
@@ -125,6 +142,7 @@ class Database {
 
                 `CREATE TABLE IF NOT EXISTS scans (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sheet_id TEXT,
                     student_id TEXT,
                     student_name TEXT NOT NULL,
                     quiz_id INTEGER,
@@ -212,7 +230,8 @@ class Database {
 
                 `CREATE TABLE IF NOT EXISTS records (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    student_id TEXT NOT NULL,
+                    sheet_id TEXT,
+                    student_id TEXT,
                     student_name TEXT NOT NULL,
                     quiz_id INTEGER,
                     quiz_title TEXT,
@@ -273,15 +292,40 @@ class Database {
                     image_hash TEXT,
                     is_scanned INTEGER DEFAULT 0,
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )`,
+
+                `CREATE TABLE IF NOT EXISTS ai_omr_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id TEXT,
+                    layout_id TEXT,
+                    exam_id TEXT,
+                    provider TEXT,
+                    model TEXT,
+                    strategy TEXT,
+                    question_count INTEGER,
+                    request_count INTEGER,
+                    input_tokens INTEGER,
+                    output_tokens INTEGER,
+                    total_tokens INTEGER,
+                    processing_time_ms INTEGER,
+                    review_count INTEGER,
+                    success INTEGER DEFAULT 0,
+                    error_code TEXT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )`,
+
+                `CREATE TABLE IF NOT EXISTS ai_layout_profiles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    layout_id TEXT NOT NULL UNIQUE,
+                    strategy TEXT,
+                    model TEXT,
+                    section_size INTEGER,
+                    image_detail TEXT,
+                    verification_mode TEXT,
+                    prompt_version TEXT,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )`
             ];
-
-            // Migration: add archived column to quizzes (if not exists)
-            try {
-                await this.run('ALTER TABLE quizzes ADD COLUMN archived INTEGER DEFAULT 0');
-            } catch (e) {
-                // Column already exists, ignore
-            }
 
             const indexQueries = [
                 `CREATE INDEX IF NOT EXISTS idx_scans_quiz_id ON scans(quiz_id)`,
@@ -291,7 +335,10 @@ class Database {
                 `CREATE INDEX IF NOT EXISTS idx_records_timestamp ON records(timestamp)`,
                 `CREATE INDEX IF NOT EXISTS idx_records_status ON records(status)`,
                 `CREATE INDEX IF NOT EXISTS idx_subject_records_student_subject ON subject_records(student_id, subject_id)`,
-                `CREATE INDEX IF NOT EXISTS idx_quizzes_subject_id ON quizzes(subject_id)`
+                `CREATE INDEX IF NOT EXISTS idx_quizzes_subject_id ON quizzes(subject_id)`,
+                `CREATE INDEX IF NOT EXISTS idx_ai_omr_usage_timestamp ON ai_omr_usage(timestamp)`,
+                `CREATE INDEX IF NOT EXISTS idx_ai_omr_usage_layout_id ON ai_omr_usage(layout_id)`,
+                `CREATE INDEX IF NOT EXISTS idx_ai_layout_profiles_layout_id ON ai_layout_profiles(layout_id)`
             ];
 
             // Run table queries sequentially
@@ -389,6 +436,7 @@ class Database {
             }
 
             if (table === 'scans') {
+                if (!columnNames.includes('sheet_id')) await this.run(`ALTER TABLE scans ADD COLUMN sheet_id TEXT`);
                 if (!columnNames.includes('student_id')) await this.run(`ALTER TABLE scans ADD COLUMN student_id TEXT`);
                 if (!columnNames.includes('total_score')) await this.run(`ALTER TABLE scans ADD COLUMN total_score INTEGER`);
                 if (!columnNames.includes('score_breakdown')) await this.run(`ALTER TABLE scans ADD COLUMN score_breakdown TEXT`);
@@ -428,6 +476,7 @@ class Database {
                 }
             }
             if (table === 'records') {
+                if (!columnNames.includes('sheet_id')) await this.run(`ALTER TABLE records ADD COLUMN sheet_id TEXT`);
                 if (!columnNames.includes('student_name')) await this.run(`ALTER TABLE records ADD COLUMN student_name TEXT`);
                 if (!columnNames.includes('quiz_title')) await this.run(`ALTER TABLE records ADD COLUMN quiz_title TEXT`);
                 if (!columnNames.includes('status')) await this.run(`ALTER TABLE records ADD COLUMN status TEXT`);
@@ -453,6 +502,7 @@ class Database {
                 if (!columnNames.includes('subject_id')) await this.run(`ALTER TABLE quizzes ADD COLUMN subject_id INTEGER`);
                 if (!columnNames.includes('format')) await this.run(`ALTER TABLE quizzes ADD COLUMN format TEXT DEFAULT 'multi-subject'`);
                 if (!columnNames.includes('subject_config')) await this.run(`ALTER TABLE quizzes ADD COLUMN subject_config TEXT`);
+                if (!columnNames.includes('archived')) await this.run(`ALTER TABLE quizzes ADD COLUMN archived INTEGER DEFAULT 0`);
             }
 
             if (table === 'answer_keys') {

@@ -8,6 +8,68 @@ function escapeHtml(s) {
         .replace(/"/g, '&quot;');
 }
 
+function normalizeAnswerOptions(values) {
+    if (!Array.isArray(values)) return [];
+    const allowed = new Set(['A', 'B', 'C', 'D']);
+    const seen = new Set();
+    const output = [];
+    values.forEach((value) => {
+        const option = String(value || '').trim().toUpperCase();
+        if (allowed.has(option) && !seen.has(option)) {
+            seen.add(option);
+            output.push(option);
+        }
+    });
+    return output;
+}
+
+function formatOcrAnswerDisplay(answer, metric = {}) {
+    const state = String(metric?.state || '').trim().toLowerCase();
+    const markedOptions = normalizeAnswerOptions(metric?.markedOptions);
+    const normalizedAnswer = String(answer || metric?.answer || '').trim().toUpperCase();
+
+    if (state === 'multiple') {
+        return {
+            value: markedOptions.length ? `MULT ${markedOptions.join('+')}` : 'MULT',
+            className: 'text-danger',
+            title: markedOptions.length ? `Multiple marks: ${markedOptions.join(', ')}` : 'Multiple marks'
+        };
+    }
+    if (normalizedAnswer === 'MULTIPLE') {
+        return {
+            value: 'MULT',
+            className: 'text-danger',
+            title: 'Multiple marks'
+        };
+    }
+    if (state === 'blank') {
+        return {
+            value: 'Blank',
+            className: 'text-muted',
+            title: 'No marked bubble detected'
+        };
+    }
+    if (state === 'uncertain') {
+        return {
+            value: 'Review',
+            className: 'text-warning',
+            title: 'AI could not confidently read this question'
+        };
+    }
+    if (normalizedAnswer) {
+        return {
+            value: normalizedAnswer,
+            className: 'text-primary',
+            title: `Selected answer: ${normalizedAnswer}`
+        };
+    }
+    return {
+        value: '—',
+        className: 'text-muted',
+        title: 'No answer'
+    };
+}
+
 function normalizeScanStatus(status, percentage = 0, passingScore = PASSING_SCORE) {
     const normalized = String(status || '').trim().toLowerCase();
     if (normalized === 'pass' || normalized === 'passinhon') return 'PASS';
@@ -34,11 +96,22 @@ class ScanCheckApp {
         this.isBulkScanning = false;
         this.selectedReceivedPaperId = null;
         this.currentOcrResult = null;
+        this.detectedScannerLayout = null;
+        this.scannerPreviewMode = 'original';
+        this.scannerOriginalPreviewImage = null;
+        this.scannerAiInputPreviewImage = null;
         this.pendingAction = null; // Store intended action for post-login redirect
         this.answerKeyDirty = false;
         this.answerKeyPlan = null;
         this.answerKeyFocusQuestion = null;
         this.answerKeyLastSavedAt = '';
+        this.imageRotation = 0;
+        this.imageZoom = 1;
+        this.imagePanX = 0;
+        this.imagePanY = 0;
+        this.scannerImageDragging = false;
+        this.scannerImageDragStartX = 0;
+        this.scannerImageDragStartY = 0;
 
         // Image preview zoom/pan state
         this.imagePreviewScale = 1;
@@ -179,7 +252,6 @@ class ScanCheckApp {
         }
     }
 
-
     async init() {
         this.setupAuthEventListeners();
         window.addEventListener('scancheck:unauthorized', () => {
@@ -230,7 +302,212 @@ class ScanCheckApp {
         if (backupLabel) backupLabel.textContent = 'No backup file selected.';
         this.setSystemBackupLog('Ready.');
         this.refreshSystemBackupHistory();
+        this.loadAiOmrSettings();
         this.applyScannerViewSettings();
+    }
+
+    renderAiOmrSettings(settings = {}) {
+        const enabled = document.getElementById('aiOmrEnabled');
+        const provider = document.getElementById('aiOmrProvider');
+        const strategy = document.getElementById('aiOmrStrategy');
+        const imageDetail = document.getElementById('aiOmrImageDetail');
+        const verificationMode = document.getElementById('aiOmrVerificationMode');
+        const model = document.getElementById('aiOmrModel');
+        const baseUrl = document.getElementById('aiOmrBaseUrl');
+        const sectionSize = document.getElementById('aiOmrSectionSize');
+        const timeoutMs = document.getElementById('aiOmrTimeoutMs');
+        const maxRetries = document.getElementById('aiOmrMaxRetries');
+        const confidenceThreshold = document.getElementById('aiOmrConfidenceThreshold');
+        const instructionPrompt = document.getElementById('aiOmrInstructionPrompt');
+        const promptVersion = document.getElementById('aiOmrPromptVersion');
+        const keyInput = document.getElementById('aiOmrApiKey');
+        const keyStatus = document.getElementById('aiOmrKeyStatus');
+        const keyPreview = document.getElementById('aiOmrKeyPreview');
+        const statusBadge = document.getElementById('aiOmrConnectionBadge');
+        const statusText = document.getElementById('aiOmrStatusText');
+        const providerText = document.getElementById('aiOmrProviderText');
+        const scannerText = document.getElementById('aiOmrProductionScannerText');
+
+        if (enabled) enabled.checked = true;
+        if (provider) provider.value = 'gemini';
+        if (providerText) providerText.textContent = 'Gemini';
+        if (scannerText) scannerText.textContent = 'AI Vision';
+        if (strategy) strategy.value = settings.strategy || 'auto';
+        if (imageDetail) imageDetail.value = settings.imageDetail || 'medium';
+        if (verificationMode) verificationMode.value = settings.verificationMode || 'uncertain';
+        if (model) {
+            const selectedModel = String(settings.model || 'gemini-3.6-flash').trim();
+            const supportedModels = Array.from(model.options || []).map((option) => option.value);
+            model.value = supportedModels.includes(selectedModel) ? selectedModel : 'gemini-3.6-flash';
+        }
+        if (baseUrl) baseUrl.value = settings.baseUrl || 'http://localhost:11434';
+        if (sectionSize) sectionSize.value = String(settings.sectionSize || 20);
+        if (timeoutMs) timeoutMs.value = String(settings.timeoutMs || 30000);
+        if (maxRetries) maxRetries.value = String(settings.maxRetries ?? 2);
+        if (confidenceThreshold) confidenceThreshold.value = String(settings.confidenceThreshold ?? 0.75);
+        if (instructionPrompt) instructionPrompt.value = settings.instructionPrompt || '';
+        if (promptVersion) promptVersion.value = settings.promptVersion || 'omr-prompt-v1';
+        if (keyInput) keyInput.value = '';
+        if (keyPreview) {
+            keyPreview.textContent = settings.hasApiKey ? (settings.apiKeyPreview || 'Configured') : 'Not configured';
+        }
+        if (keyStatus) {
+            keyStatus.textContent = settings.hasApiKey
+                ? `Saved backend key: ${settings.apiKeyPreview || 'configured'}`
+                : 'No backend Gemini API key saved.';
+            keyStatus.classList.toggle('text-success', Boolean(settings.hasApiKey));
+            keyStatus.classList.toggle('text-muted', !settings.hasApiKey);
+        }
+        if (statusText) statusText.textContent = settings.hasApiKey ? 'Configured' : 'Missing API key';
+        if (statusBadge) {
+            statusBadge.textContent = settings.hasApiKey ? 'Gemini Connected' : 'Setup Required';
+            statusBadge.className = `badge ${settings.hasApiKey ? 'bg-success' : 'bg-warning text-dark'} ms-auto`;
+        }
+        this.aiOmrDefaultPrompt = settings.defaultPrompt || this.aiOmrDefaultPrompt || '';
+        this.updateAiOmrProviderFields();
+    }
+
+    updateAiOmrProviderFields() {
+        const model = document.getElementById('aiOmrModel');
+        const apiKey = document.getElementById('aiOmrApiKey');
+        const baseUrlGroup = document.getElementById('aiOmrBaseUrlGroup');
+
+        if (model && !model.value) model.value = 'gemini-3.6-flash';
+        if (apiKey) apiKey.placeholder = 'Paste a new Gemini API key';
+        if (baseUrlGroup) baseUrlGroup.classList.add('d-none');
+    }
+
+    async loadAiOmrSettings() {
+        try {
+            const response = await this.apiCallWithAuth('/api/ai-omr/settings', {}, 'loadAiOmrSettings');
+            this.renderAiOmrSettings(response.settings || {});
+            this.loadAiOmrUsage();
+        } catch (error) {
+            console.error('Error loading AI OMR settings:', error);
+        }
+    }
+
+    collectAiOmrSettings(clearApiKey = false) {
+        const apiKey = document.getElementById('aiOmrApiKey')?.value || '';
+        const instructionPromptEl = document.getElementById('aiOmrInstructionPrompt');
+        const prompt = String(instructionPromptEl?.value || '').trim();
+        if (!clearApiKey && instructionPromptEl && !prompt) {
+            throw new Error('Scanner prompt cannot be blank.');
+        }
+        const payload = {
+            enabled: true,
+            provider: 'gemini',
+            strategy: document.getElementById('aiOmrStrategy')?.value || 'auto',
+            imageDetail: document.getElementById('aiOmrImageDetail')?.value || 'medium',
+            verificationMode: document.getElementById('aiOmrVerificationMode')?.value || 'uncertain',
+            model: document.getElementById('aiOmrModel')?.value || 'gemini-3.6-flash',
+            baseUrl: document.getElementById('aiOmrBaseUrl')?.value || 'http://localhost:11434',
+            sectionSize: Number.parseInt(document.getElementById('aiOmrSectionSize')?.value || '20', 10),
+            timeoutMs: Number.parseInt(document.getElementById('aiOmrTimeoutMs')?.value || '30000', 10),
+            maxRetries: Number.parseInt(document.getElementById('aiOmrMaxRetries')?.value || '2', 10),
+            confidenceThreshold: Number.parseFloat(document.getElementById('aiOmrConfidenceThreshold')?.value || '0.75'),
+            promptVersion: document.getElementById('aiOmrPromptVersion')?.value || 'omr-prompt-v1',
+            apiKey: clearApiKey ? '' : apiKey,
+            clearApiKey
+        };
+        if (instructionPromptEl && prompt) {
+            payload.instructionPrompt = prompt;
+        }
+        return payload;
+    }
+
+    async saveAiOmrSettings(clearApiKey = false) {
+        try {
+            const payload = this.collectAiOmrSettings(clearApiKey);
+            const response = await this.apiCallWithAuth('/api/ai-omr/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }, 'saveAiOmrSettings');
+            this.renderAiOmrSettings(response.settings || {});
+            this.toggleAiKeyReplace(false);
+            this.showToast(clearApiKey ? 'Provider API key cleared.' : 'AI scanner settings saved.', 'success');
+        } catch (error) {
+            this.showToast(`AI scanner settings failed: ${error.message || error}`, 'danger');
+        }
+    }
+
+    toggleAiKeyReplace(show) {
+        const group = document.getElementById('aiOmrKeyInputGroup');
+        const input = document.getElementById('aiOmrApiKey');
+        if (group) group.classList.toggle('d-none', !show);
+        if (input) {
+            input.value = '';
+            input.type = 'password';
+            if (show) input.focus();
+        }
+    }
+
+    restoreDefaultAiPrompt() {
+        const textarea = document.getElementById('aiOmrInstructionPrompt');
+        const version = document.getElementById('aiOmrPromptVersion');
+        if (textarea) textarea.value = this.aiOmrDefaultPrompt || '';
+        if (version) version.value = 'omr-prompt-v1';
+        this.showToast('Default scanner prompt restored. Save settings to apply it.', 'info');
+    }
+
+    async testAiOmrConnection() {
+        const btn = document.getElementById('aiOmrTestConnectionBtn');
+        const previous = btn?.innerHTML;
+        try {
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Testing';
+            }
+            const response = await this.apiCallWithAuth('/api/ai-omr/test-connection', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model: document.getElementById('aiOmrModel')?.value || undefined })
+            }, 'testAiOmrConnection');
+            if (response.success) {
+                this.showToast('Gemini connection successful.', 'success');
+                const badge = document.getElementById('aiOmrConnectionBadge');
+                const status = document.getElementById('aiOmrStatusText');
+                if (badge) {
+                    badge.textContent = 'Gemini Connected';
+                    badge.className = 'badge bg-success ms-auto';
+                }
+                if (status) status.textContent = 'Connected';
+            } else {
+                this.showToast(response.message || 'Connection failed. Check the API key, billing, or model configuration.', 'warning');
+            }
+        } catch (error) {
+            this.showToast('Connection failed. Check the API key, billing, or model configuration.', 'danger');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = previous || '<i class="fas fa-plug me-1"></i> Test Connection';
+            }
+        }
+    }
+
+    async loadAiOmrUsage() {
+        try {
+            const response = await this.apiCallWithAuth('/api/ai-omr/usage', {}, 'loadAiOmrUsage');
+            this.renderAiOmrUsage(response.usage || response || {});
+        } catch (error) {
+            this.renderAiOmrUsage(null);
+        }
+    }
+
+    renderAiOmrUsage(usage) {
+        const month = usage?.thisMonth || {};
+        const average = usage?.average || {};
+        const setText = (id, value) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = value == null || value === '' ? '-' : String(value);
+        };
+        setText('aiOmrUsageMonthPapers', month.papers ?? month.scanCount ?? 0);
+        setText('aiOmrUsageRequests', month.requests ?? month.requestCount ?? 0);
+        const avgMs = Number(average.processingTimeMs ?? month.averageProcessingTimeMs ?? month.averageProcessingMs);
+        setText('aiOmrUsageAvgProcessing', Number.isFinite(avgMs) && avgMs > 0 ? `${(avgMs / 1000).toFixed(1)} s` : '-');
+        const tokens = Number(month.tokens ?? month.totalTokens);
+        setText('aiOmrUsageTokens', Number.isFinite(tokens) && tokens > 0 ? tokens.toLocaleString() : '0');
     }
 
     setSystemBackupLog(message, isError = false) {
@@ -256,6 +533,7 @@ class ScanCheckApp {
     async refreshSystemBackupHistory() {
         const container = document.getElementById('systemBackupHistory');
         if (!container) return;
+        if (!this.isAuthenticated()) return;
         try {
             const response = await this.apiCallWithAuth('/api/system/backup/history', {}, 'loadBackupHistory');
             const backups = Array.isArray(response?.backups) ? response.backups : [];
@@ -723,7 +1001,6 @@ class ScanCheckApp {
         }
     }
 
-
     getDefaultMultiSubjects() {
         return [
             { code: 'ENG', name: 'ENGLISH', questions: 20 },
@@ -860,8 +1137,6 @@ class ScanCheckApp {
         }
     }
 
-
-
     isAuthenticated() {
         const token = localStorage.getItem('scancheck_token');
         return !!(token && token !== 'undefined' && token !== 'null');
@@ -885,7 +1160,6 @@ class ScanCheckApp {
                 .catch(e => console.error('loadSystems failed:', e));
 
             // Populate UI elements that are independent of the data.
-            this.populateDepartmentSelector();
             this.populateReportFilters();
 
             // Always render the dashboard – it will show “No recent activity”
@@ -898,12 +1172,66 @@ class ScanCheckApp {
 
     populateReportFilters() {
         const filter = document.getElementById('reportQuizFilter');
-        if (!filter) return;
-        
-        const current = filter.value;
-        filter.innerHTML = '<option value="">All Exams</option>' + 
-            this.quizzes.map(q => `<option value="${q.id}">${escapeHtml(q.title)}</option>`).join('');
-        filter.value = current;
+        const subjectFilter = document.getElementById('reportSubjectSelect');
+        const entryFilter = document.getElementById('reportEntryFilter');
+        const equityFilter = document.getElementById('reportEquityFilter');
+
+        // Quiz filter
+        if (filter) {
+            const current = filter.value;
+            filter.innerHTML = '<option value="">All Exams</option>' + 
+                this.quizzes.map(q => `<option value="${q.id}">${escapeHtml(q.title)}</option>`).join('');
+            filter.value = current;
+        }
+
+        // Subject filter (populate once; preserve selection)
+        if (subjectFilter && !subjectFilter.dataset.populated) {
+            const current = subjectFilter.value;
+            const subjectMap = new Map();
+            (Array.isArray(this.quizzes) ? this.quizzes : []).forEach(q => {
+                if (Array.isArray(q.subjectConfig)) {
+                    q.subjectConfig.forEach(sub => {
+                        if (!sub) return;
+                        const code = String(sub.code || sub.name || '').trim();
+                        if (code) subjectMap.set(code, sub.name || code);
+                    });
+                }
+            });
+            if (subjectMap.size > 0) {
+                subjectFilter.innerHTML = '<option value="">All Subjects</option>' + 
+                    [...subjectMap.entries()].map(([code, name]) => `<option value="${escapeHtml(code)}">${escapeHtml(name)}</option>`).join('');
+            }
+            subjectFilter.value = current;
+            subjectFilter.dataset.populated = '1';
+        }
+
+        // Entry type filter
+        if (entryFilter && !entryFilter.dataset.populated) {
+            const current = entryFilter.value;
+            const entryTypes = ["New Student", "Transferee"];
+            entryFilter.innerHTML = '<option value="">All Entry Types</option>' + 
+                entryTypes.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+            entryFilter.value = current;
+            entryFilter.dataset.populated = '1';
+        }
+
+        // Equity group filter
+        if (equityFilter && !equityFilter.dataset.populated) {
+            const current = equityFilter.value;
+            const equityGroups = ["PWDs", "IPs", "Solo Parent", "Magna Carta"];
+            equityFilter.innerHTML = '<option value="">All Equity Groups</option>' + 
+                equityGroups.map(g => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join('');
+            equityFilter.value = current;
+            equityFilter.dataset.populated = '1';
+        }
+    }
+
+    resetReportFilters() {
+        ['reportQuizFilter', 'reportDateFrom', 'reportDateTo', 'reportEntryFilter', 'reportEquityFilter', 'reportRankingSort', 'reportSubjectSelect', 'reportMinScore'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.value = '';
+        });
+        this.refreshReports();
     }
 
     async refreshReports() {
@@ -1279,9 +1607,19 @@ class ScanCheckApp {
                 return (quiz && quiz.passingScore) ? quiz.passingScore : PASSING_SCORE;
             })();
             for (const [code, data] of Object.entries(scoresObj)) {
-                const pct = Number(data.percentage);
+                // Tolerate legacy flat format where the value is a raw number instead
+                // of an object { percentage, status, score, total }.
+                // Legacy values were either percentages (usually > 20, up to 100) or scores (0-20).
+                const isNested = data && typeof data === 'object';
+                let pct;
+                if (isNested) {
+                    pct = Number(data.percentage);
+                } else {
+                    const raw = Number(data);
+                    pct = Number.isFinite(raw) && raw > 0 ? (raw > 20 ? raw : (raw / 20) * 100) : NaN;
+                }
                 if (!Number.isFinite(pct) || pct === 0) continue; // skip zero‑score takers
-                const status = normalizeScanStatus(data.status, pct, passingScore);
+                const status = normalizeScanStatus(isNested ? data.status : null, pct, passingScore);
                 const passed = status === 'PASS' ? 1 : 0;
                 const studentName = String(scan.student_name || scan.studentName || '').trim() || 'N/A';
                 if (!subjectMap.has(code)) {
@@ -1452,7 +1790,6 @@ class ScanCheckApp {
         return rows.map((row, idx) => ({ ...row, rank: idx + 1 }));
     }
 
-
     sortRankingRows(rows = [], sortMode = 'rank', entity = 'generic') {
         const mode = String(sortMode || 'rank').toLowerCase();
         if (mode === 'alpha') {
@@ -1536,7 +1873,6 @@ class ScanCheckApp {
             console.error('Error loading system info:', error);
         }
     }
-
 
     renderDashboard() {
         const statQuizzes = document.getElementById('statQuizzes');
@@ -1868,74 +2204,6 @@ class ScanCheckApp {
             this._dashboardCharts.push(chart);
         }
     }
-
-    populateDepartmentSelector() {
-        const departments = [
-            { name: "Normal Entrance Exam", logo: "pcc.png", short: "Entrance" },
-            { name: "Bachelor of Science in Criminology", logo: "Bachelor of Science in Criminology.png", short: "Criminology" },
-            { name: "Bachelor of Elementary Education", logo: "Bachelor of Elementary Education.png", short: "Elem. Ed" },
-            { name: "Bachelor of Secondary Education", logo: "Bachelor of Secondary Education copy.png", short: "Sec. Ed" },
-            { name: "Bachelor of Science in Hospitality Management", logo: "Bachelor of Science in Hospitality Management.png", short: "Hospitality" },
-            { name: "Bachelor of Science in Business Administration", logo: "Bachelor of Science in Business Administration.png", short: "Business" },
-            { name: "Bachelor of Science in Information Technology", logo: "Bachelor of Science in Information Technology.png", short: "IT" }
-        ];
-
-        const container = document.getElementById('departmentButtons');
-        if (!container) return;
-
-        container.innerHTML = departments.map(dept => `
-            <div class="col-6 col-md-3 mb-2">
-                <button class="btn btn-outline-primary w-100 py-3 department-btn" 
-                        onclick="app.generateDepartmentSheet('${dept.name}', '${dept.logo}')"
-                        style="border-radius: 8px; transition: all 0.2s;">
-                    <div class="d-flex flex-column align-items-center">
-                        <img src="images/${dept.logo}" style="height: 40px; margin-bottom: 8px;" alt="${dept.name}">
-                        <small class="fw-bold">${dept.short}</small>
-                    </div>
-                </button>
-            </div>
-        `).join('');
-    }
-
-    generateDepartmentSheet(name, logo) {
-        const select = document.getElementById('examQuizSelect');
-        const qId = select.value;
-        const q = this.quizzes.find(x => String(x.id) === String(qId));
-        
-        if (!q) {
-            this.showToast('Please select an exam first', 'warning');
-            return;
-        }
-
-        const config = {
-            ...this.normalizeQuizData(q),
-            courseName: name,
-            courseLogo: logo,
-            subjects: this.getSubjectConfigForQuiz(q),
-            paperSize: 'a4'
-        };
-        
-        scanCheckConfig.currentQuiz = config;
-        scanCheckConfig.currentFormat = q.format || 'multi-subject';
-        localStorage.setItem('scancheck_current_quiz', JSON.stringify(config));
-        localStorage.setItem('scancheck_sheet_format', q.format || 'multi-subject');
-
-        const previewContainer = document.getElementById('omr-sheet');
-        if (previewContainer) {
-            previewContainer.innerHTML = '';
-            if (q.format === 'normal' && window.normalAnswerSheetGenerator) {
-                window.normalAnswerSheetGenerator.generate(config, previewContainer);
-            } else if (window.answerSheetGenerator) {
-                window.answerSheetGenerator.generate(config, previewContainer);
-            }
-        }
-
-        this.showToast(`Generated ${q.format === 'normal' ? 'Normal' : 'Multi-Subject'} sheet for ${name}`, 'success');
-        
-        // Scroll to preview
-        document.getElementById('answerSheetPreview').scrollIntoView({ behavior: 'smooth' });
-    }
-
     fitAnswerSheetPage() {
         this.answerSheetPreviewMode = 'fit';
         this.applyAnswerSheetPreviewZoom();
@@ -1957,7 +2225,6 @@ class ScanCheckApp {
         this.answerSheetPreviewZoom = Math.max(0.1, this.answerSheetPreviewZoom - 0.15);
         this.applyAnswerSheetPreviewZoom();
     }
-
 
     applyAnswerSheetPreviewZoom() {
         const preview = document.getElementById('answerSheetPreview');
@@ -2315,6 +2582,7 @@ class ScanCheckApp {
         return {
             id: fallbackId,
             record_id: record?.id,
+            sheet_id: record?.sheet_id || record?.sheetId || '',
             student_id: record?.student_id || record?.studentId || '',
             student_name: record?.student_name || record?.studentName || 'Student',
             quiz_id: quizId,
@@ -2545,11 +2813,14 @@ class ScanCheckApp {
         }
     }
 
-
     setupEventListeners() {
         document.getElementById('scannerExamSelect')?.addEventListener('change', (e) => {
             const quizId = e.target.value;
             localStorage.setItem('scancheck_selected_scanner_quiz', quizId || '');
+            if (this.detectedScannerLayout && String(this.detectedScannerLayout.quizId || '') !== String(quizId || '')) {
+                this.detectedScannerLayout = null;
+                this.renderScannerLayoutDetection(null, 'idle');
+            }
             this.updateScannerScanButtonState();
         });
 
@@ -2630,6 +2901,13 @@ class ScanCheckApp {
 
         document.getElementById('recordsEquityFilter')?.addEventListener('change', () => {
             this.renderRecords();
+        });
+
+        // Report filters trigger a refresh when changed
+        ['reportQuizFilter', 'reportDateFrom', 'reportDateTo', 'reportEntryFilter', 'reportEquityFilter', 'reportRankingSort', 'reportSubjectSelect', 'reportMinScore'].forEach(id => {
+            document.getElementById(id)?.addEventListener('change', () => {
+                this.refreshReports();
+            });
         });
 
         document.getElementById('qrExcelImportBtn')?.addEventListener('click', () => {
@@ -2980,6 +3258,42 @@ class ScanCheckApp {
         document.getElementById('systemBackupRestoreBtn')?.addEventListener('click', () => {
             this.restoreSystemBackup();
         });
+        document.getElementById('aiOmrSaveSettingsBtn')?.addEventListener('click', () => {
+            this.saveAiOmrSettings(false);
+        });
+        document.getElementById('aiOmrStrategy')?.addEventListener('change', (event) => {
+            if (event.target.value === 'custom') {
+                const advanced = document.getElementById('aiOmrAdvancedCollapse');
+                if (advanced && window.bootstrap) {
+                    bootstrap.Collapse.getOrCreateInstance(advanced, { toggle: false }).show();
+                }
+            }
+        });
+        document.getElementById('aiOmrProvider')?.addEventListener('change', () => {
+            this.updateAiOmrProviderFields();
+        });
+        document.getElementById('aiOmrTestConnectionBtn')?.addEventListener('click', () => {
+            this.testAiOmrConnection();
+        });
+        document.getElementById('aiOmrReplaceKeyBtn')?.addEventListener('click', () => {
+            this.toggleAiKeyReplace(true);
+        });
+        document.getElementById('aiOmrCancelReplaceKeyBtn')?.addEventListener('click', () => {
+            this.toggleAiKeyReplace(false);
+        });
+        document.getElementById('aiOmrRemoveKeyBtn')?.addEventListener('click', () => {
+            if (confirm('Remove Gemini API key? AI scanning will stop working until another key is configured.')) {
+                this.saveAiOmrSettings(true);
+            }
+        });
+        document.getElementById('aiOmrRestorePromptBtn')?.addEventListener('click', () => {
+            this.restoreDefaultAiPrompt();
+        });
+        document.getElementById('aiOmrToggleKeyBtn')?.addEventListener('click', () => {
+            const input = document.getElementById('aiOmrApiKey');
+            if (!input) return;
+            input.type = input.type === 'password' ? 'text' : 'password';
+        });
 
         const editSubjectsModalEl = document.getElementById('editSubjectsModal');
         if (editSubjectsModalEl) {
@@ -2987,8 +3301,6 @@ class ScanCheckApp {
                 this.prepareEditSubjectsModal();
             });
         }
-
-
 
         // Received Papers sorting
         document.getElementById('courseSort')?.addEventListener('change', (e) => {
@@ -3001,11 +3313,12 @@ class ScanCheckApp {
                 return;
             }
             const isMac = navigator.platform.toUpperCase().indexOf('MAC')>=0;
-            if ((!isMac && e.ctrlKey && e.key.toLowerCase()==='p') || (isMac && e.metaKey && e.key.toLowerCase()==='p')) {
+            const key = (e.key || '').toLowerCase();
+            if ((!isMac && e.ctrlKey && key==='p') || (isMac && e.metaKey && key==='p')) {
                 e.preventDefault();
                 printAnswerSheet();
             }
-            if (e.key.toLowerCase()==='g') {
+            if (key==='g') {
                 generateAnswerSheet();
             }
         });
@@ -3172,7 +3485,6 @@ class ScanCheckApp {
         }).join('');
     }
 
-
     openCreateAnswerKey(preselectedQuizId = '') {
         // Reset and show the right panel parts for creation
         document.getElementById('akEmptyState')?.classList.add('d-none');
@@ -3263,7 +3575,6 @@ class ScanCheckApp {
         document.getElementById('answerKeyEdit')?.classList.add('d-none');
         document.getElementById('answerKeyPreview')?.classList.remove('d-none');
     }
-
 
     openSelectedAnswerKeyEditor() {
         const quizId = String(this.selectedAnswerKeyQuizId || '');
@@ -3540,7 +3851,7 @@ class ScanCheckApp {
                 <tr class="${needsReview ? 'table-warning' : ''}">
                     <td class="ps-4">
                         <div class="fw-bold text-dark">${escapeHtml(record.student_name || 'Unnamed')}</div>
-                        <div class="small text-muted">${escapeHtml(record.student_id || 'No ID')}</div>
+                        <div class="small text-muted">Sheet ${escapeHtml(record.sheet_id || 'No Sheet ID')}</div>
                     </td>
                     <td>
                         <div class="small fw-semibold text-dark">${escapeHtml(record.course || 'Unknown')}</div>
@@ -3607,7 +3918,7 @@ class ScanCheckApp {
             const worksheet = workbook.addWorksheet('Records');
             worksheet.columns = [
                 { header: 'Student Name', key: 'student_name', width: 28 },
-                { header: 'Student ID', key: 'student_id', width: 18 },
+                { header: 'Sheet ID', key: 'sheet_id', width: 18 },
                 { header: 'Exam', key: 'quiz_title', width: 26 },
                 { header: 'Course', key: 'course', width: 22 },
                 { header: 'Entry Type', key: 'entry_type', width: 16 },
@@ -3642,7 +3953,7 @@ class ScanCheckApp {
                 const status = String(record?.status || (percentage >= PASSING_SCORE ? 'PASS' : 'FAIL')).toUpperCase();
                 worksheet.addRow({
                     student_name: record?.student_name || '',
-                    student_id: record?.student_id || '',
+                    sheet_id: record?.sheet_id || '',
                     quiz_title: record?.quiz_title || 'OCR Review',
                     course: record?.course || '',
                     entry_type: record?.entry_type || '',
@@ -3737,7 +4048,7 @@ class ScanCheckApp {
                                     <div class="p-3 bg-light rounded-4">
                                         <div class="small text-muted text-uppercase fw-bold mb-2" style="font-size: 0.65rem;">Student Information</div>
                                         <div class="fw-bold text-dark mb-1">${escapeHtml(record.student_name || 'N/A')}</div>
-                                        <div class="small text-muted">ID: ${escapeHtml(record.student_id || 'N/A')} | Age: ${escapeHtml(record.age || 'N/A')}</div>
+                                        <div class="small text-muted">Sheet: ${escapeHtml(record.sheet_id || 'N/A')} | Age: ${escapeHtml(record.age || 'N/A')}</div>
                                     </div>
                                 </div>
                                 <div class="col-md-6">
@@ -4119,7 +4430,6 @@ class ScanCheckApp {
         }
     }
 
-
     getAnswerKeyActiveQuestionIndexes() {
         if (!this.answerKeyPlan) return [];
         const indexes = [];
@@ -4235,7 +4545,6 @@ class ScanCheckApp {
         this.updateAnswerKeySummary();
     }
 
-
     collectAnswerKeyAnswers() {
         this.syncAnswerKeyDOMToDraft();
         const activeQuestions = this.getAnswerKeyActiveQuestionIndexes();
@@ -4252,7 +4561,6 @@ class ScanCheckApp {
             answers
         };
     }
-
 
     updateAnswerKeySummary() {
         if (!this.answerKeyPlan) return;
@@ -4311,7 +4619,6 @@ class ScanCheckApp {
             return false;
         }
     }
-
 
     exportAnswerKeyJson() {
         const quiz = scanCheckConfig.currentQuiz;
@@ -4391,7 +4698,7 @@ class ScanCheckApp {
         }
 
         const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-        if ((!isMac && event.ctrlKey && event.key.toLowerCase() === 's') || (isMac && event.metaKey && event.key.toLowerCase() === 's')) {
+        if ((!isMac && event.ctrlKey && (event.key || '').toLowerCase() === 's') || (isMac && event.metaKey && (event.key || '').toLowerCase() === 's')) {
             event.preventDefault();
             saveAnswerKey();
             return true;
@@ -4822,7 +5129,7 @@ class ScanCheckApp {
                 window.answerSheetGenerator.generate(quizData);
             }
             
-            toastManager.showInfo('Quiz created (offline mode)');
+            toastManager.showInfo('Quiz created in local fallback mode');
         }
     }
 
@@ -4850,7 +5157,7 @@ class ScanCheckApp {
                 this.quizzes[index] = { ...this.quizzes[index], ...quizData };
                 this.updateLocalQuiz(this.quizzes[index]);
                 this.renderQuizList();
-                toastManager.showInfo('Quiz updated (offline mode)');
+                toastManager.showInfo('Quiz updated in local fallback mode');
             } else {
                 // Error already handled by apiCallWithAuth
             }
@@ -4946,6 +5253,30 @@ class ScanCheckApp {
         }
     }
 
+    // Permanently delete an archived quiz (irreversible)
+    async permanentDeleteQuiz(quizId) {
+        if (!confirm('Permanently delete this answer key and ALL its associated scans and records? This cannot be undone.')) {
+            return;
+        }
+        try {
+            const response = await this.apiCallWithAuth(`/api/quizzes/${quizId}/permanent`, {
+                method: 'DELETE'
+            }, 'permanentDeleteQuiz');
+            const detail = response && response.message ? ` ${response.message}` : '';
+            toastManager.showSuccess(`Answer key permanently deleted.${detail}`);
+            // Refresh both lists
+            await this.loadQuizzes();
+            if (this._showArchivedQuizzes) {
+                await this.renderArchivedQuizzes();
+            }
+            const badge = document.getElementById('archivedCountBadge');
+            if (badge) badge.textContent = '0';
+        } catch (error) {
+            console.error('Error deleting quiz:', error);
+            toastManager.showError('Failed to delete answer key');
+        }
+    }
+
     // Render archived quizzes
     async renderArchivedQuizzes() {
         const container = document.getElementById('archivedQuizList');
@@ -4963,6 +5294,8 @@ class ScanCheckApp {
                     <small>Deleted answer keys will appear here and can be restored</small>
                 </div>
             `;
+            const badge = document.getElementById('archivedCountBadge');
+            if (badge) badge.textContent = '0';
             return;
         }
         
@@ -4977,6 +5310,9 @@ class ScanCheckApp {
                 <div>
                     <button class="btn btn-sm btn-outline-success me-2" onclick="app.restoreQuiz(${quiz.id})" title="Restore this answer key">
                         <i class="fas fa-undo me-1"></i> Restore
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="app.permanentDeleteQuiz(${quiz.id})" title="Permanently delete this answer key and all its data">
+                        <i class="fas fa-trash me-1"></i> Delete
                     </button>
                 </div>
             </div>
@@ -5062,7 +5398,6 @@ class ScanCheckApp {
     getLocalScanResults() {
         return JSON.parse(localStorage.getItem('scancheck_scans') || '[]');
     }
-
 
     showToast(message, type = 'info', action = null) {
         // Delegate to shared toastManager
@@ -5197,8 +5532,6 @@ class ScanCheckApp {
         // Re-generate current preview after subject changes.
         this.generateGenericSheet();
     }
-
-
 
     // Received Papers Logic
     async loadReceivedPapers() {
@@ -5415,7 +5748,6 @@ class ScanCheckApp {
         }
     }
 
-
     async bulkScanFromInbox() {
         if (this.selectedInboxPaperIds.size === 0) return;
 
@@ -5567,7 +5899,6 @@ class ScanCheckApp {
         return date.toLocaleDateString();
     }
 
-
     selectReceivedPaper(id) {
         const paper = this.receivedPapers.find(item => item.id === id);
         if (!paper) return;
@@ -5639,17 +5970,17 @@ class ScanCheckApp {
         location.hash = '#/scan';
 
         setTimeout(() => {
-            const preview = document.getElementById('scannerImagePreview');
-            if (preview) {
-                preview.innerHTML = `<img src="${imageUrl}" class="img-fluid rounded shadow" alt="Paper Preview" style="max-height: 450px;" onerror="if(!this.dataset.fallbackTried){this.dataset.fallbackTried='1';this.src=this.src.includes('/api/uploads/')?this.src.replace('/api/uploads/','/uploads/'):this.src.replace('/uploads/','/api/uploads/');}else{this.style.display='none';}">`;
-            }
+            this.setScannerPreviewImage(imageUrl, paper.student_name || 'Paper Preview');
             this.selectedScanImage = imageUrl;
             this.selectedScanImages = [];
             this.bulkScanResults = [];
             this.selectedReceivedPaperId = paper.id;
             this.currentOcrResult = null;
+            this.detectedScannerLayout = null;
+            this.scannerAiInputPreviewImage = null;
             this.renderBulkScanQueue();
             this.updateScannerScanButtonState();
+            this.identifyScannerLayout(imageUrl);
 
             if (document.getElementById('scannerStudentName')) document.getElementById('scannerStudentName').value = paper.student_name || '';
             if (document.getElementById('scannerStudentCourse')) document.getElementById('scannerStudentCourse').value = paper.course || '';
@@ -5672,17 +6003,164 @@ class ScanCheckApp {
         });
     }
 
+    async compressScannerImageForUpload(imageData, options = {}) {
+        const value = String(imageData || '');
+        if (!value.startsWith('data:image/')) return imageData;
+
+        const maxDimension = Number(options.maxDimension || 2200);
+        const quality = Number(options.quality || 0.9);
+        const approximateBytes = Math.round((value.length * 3) / 4);
+        if (approximateBytes < 1_500_000) return imageData;
+
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+                try {
+                    const scale = Math.min(1, maxDimension / Math.max(img.naturalWidth || img.width, img.naturalHeight || img.height));
+                    if (scale >= 1 && approximateBytes < 2_500_000) {
+                        resolve(imageData);
+                        return;
+                    }
+                    const canvas = document.createElement('canvas');
+                    canvas.width = Math.max(1, Math.round((img.naturalWidth || img.width) * scale));
+                    canvas.height = Math.max(1, Math.round((img.naturalHeight || img.height) * scale));
+                    const ctx = canvas.getContext('2d', { alpha: false });
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    resolve(canvas.toDataURL('image/jpeg', quality));
+                } catch (error) {
+                    console.warn('Scanner image compression failed; using original upload payload.', error);
+                    resolve(imageData);
+                }
+            };
+            img.onerror = () => resolve(imageData);
+            img.src = imageData;
+        });
+    }
+
     setScannerPreviewImage(imageData, label = 'Preview') {
+        this.scannerOriginalPreviewImage = imageData;
+        this.scannerPreviewMode = this.scannerPreviewMode || 'original';
+        this.setScannerPreviewMode(this.scannerPreviewMode, { preserveTransform: true, skipValidation: true });
+        this.validateImageQuality(imageData);
+    }
+
+    setScannerPreviewMode(mode = 'original', options = {}) {
+        const requestedMode = ['original', 'aiInput', 'results'].includes(mode) ? mode : 'original';
+        const hasAiInput = Boolean(this.scannerAiInputPreviewImage);
+        const hasResults = Boolean(this.currentOcrResult);
+        const nextMode = requestedMode === 'aiInput' && !hasAiInput
+            ? 'original'
+            : (requestedMode === 'results' && !hasResults ? 'original' : requestedMode);
+
+        this.scannerPreviewMode = nextMode;
+        const buttons = {
+            original: document.getElementById('scannerPreviewTabOriginal'),
+            aiInput: document.getElementById('scannerPreviewTabAiInput'),
+            results: document.getElementById('scannerPreviewTabResults')
+        };
+        Object.entries(buttons).forEach(([key, btn]) => {
+            if (!btn) return;
+            const active = key === nextMode;
+            btn.classList.toggle('btn-primary', active);
+            btn.classList.toggle('btn-outline-primary', !active);
+        });
+        if (buttons.aiInput) buttons.aiInput.disabled = !hasAiInput;
+        if (buttons.results) buttons.results.disabled = !hasResults;
+
         const preview = document.getElementById('scannerImagePreview');
         const controls = document.getElementById('scannerImageControls');
-        if (preview) {
-            preview.innerHTML = `<img src="${imageData}" id="activeScannerImage" class="img-fluid rounded shadow" alt="${escapeHtml(label)}">`;
+        if (!preview) return;
+
+        if (nextMode === 'results') {
+            preview.innerHTML = this.buildScannerResultsPreviewHtml(this.currentOcrResult);
             preview.classList.remove('border-dashed');
+            if (controls) controls.classList.add('d-none');
+            return;
         }
+
+        const imageData = nextMode === 'aiInput' ? this.scannerAiInputPreviewImage : this.scannerOriginalPreviewImage;
+        if (!imageData) {
+            preview.innerHTML = `
+                <div class="scanner-preview-empty">
+                    <i class="fas fa-image fa-2x mb-3 opacity-50"></i>
+                    <div class="fw-bold">${nextMode === 'aiInput' ? 'AI Input not available' : 'No image uploaded'}</div>
+                    <div class="small text-muted">${nextMode === 'aiInput' ? 'Run a scan to view the prepared AI input.' : 'Upload a clear answer sheet to begin.'}</div>
+                </div>
+            `;
+            if (controls) controls.classList.add('d-none');
+            return;
+        }
+
+        preview.innerHTML = `<img src="${imageData}" id="activeScannerImage" class="scanner-preview-image rounded shadow" alt="${escapeHtml(nextMode === 'aiInput' ? 'AI input preview' : 'Original preview')}" draggable="false">`;
+        preview.classList.remove('border-dashed');
         if (controls) controls.classList.remove('d-none');
-        this.imageRotation = 0;
-        this.imageZoom = 1;
-        this.validateImageQuality(imageData);
+        if (!options.preserveTransform) {
+            this.imageRotation = 0;
+            this.imageZoom = 1;
+            this.imagePanX = 0;
+            this.imagePanY = 0;
+        }
+        this.applyScannerImageTransform();
+        this.initScannerPreviewInteractions();
+        if (!options.skipValidation) this.validateImageQuality(imageData);
+    }
+
+    buildScannerResultsPreviewHtml(result = {}) {
+        if (!result?.success) {
+            return `
+                <div class="scanner-preview-empty">
+                    <i class="fas fa-chart-bar fa-2x mb-3 opacity-50"></i>
+                    <div class="fw-bold">No result available</div>
+                    <div class="small text-muted">Scan a paper to view section results.</div>
+                </div>
+            `;
+        }
+        const questionMetrics = Array.isArray(result.questionMetrics) ? result.questionMetrics : [];
+        const sections = result.templateMetrics?.sections || result.metrics?.sections || [];
+        const total = Number(result.totalTemplateQuestions || result.activeQuestionCount || questionMetrics.length || 0);
+        const explicitReviewQuestions = Array.isArray(result.needsReview) ? result.needsReview : [];
+        const metricReviewQuestions = questionMetrics
+            .filter((metric) => {
+                const state = String(metric.state || '').toLowerCase();
+                return metric.needsReview || state === 'uncertain';
+            })
+            .map((metric) => Number(metric.questionNumber ?? metric.question))
+            .filter(Number.isFinite);
+        const reviewQuestions = new Set([...explicitReviewQuestions.map(Number), ...metricReviewQuestions]);
+        const rows = Array.isArray(sections) && sections.length
+            ? sections.map((section, index) => {
+                const sectionQuestions = Array.isArray(section.questions) ? section.questions.map(Number).filter(Number.isFinite) : [];
+                const start = Number(section.startQuestion || section.start || section.firstQuestion || sectionQuestions[0] || index * 20 + 1);
+                const end = Number(section.endQuestion || section.end || section.lastQuestion || sectionQuestions[sectionQuestions.length - 1] || start + Number(section.questionCount || 20) - 1);
+                const label = section.subject || section.name || section.label || `Section ${index + 1}`;
+                const expected = Math.max(0, end - start + 1);
+                const read = questionMetrics.filter((metric) => {
+                    const q = Number(metric.questionNumber ?? metric.question);
+                    const state = String(metric.state || '').toLowerCase();
+                    return q >= start && q <= end && state !== 'ignored';
+                }).length || Math.min(expected, total);
+                const review = Array.from(reviewQuestions).filter((q) => q >= start && q <= end).length;
+                return { label, read, expected, review };
+            })
+            : [{ label: 'Answers', read: Number(result.metrics?.returnedQuestions || questionMetrics.length || total), expected: total, review: reviewQuestions.size }];
+
+        return `
+            <div class="scanner-results-summary">
+                <div class="text-center mb-2">
+                    <div class="fw-bold text-dark">AI Vision Results</div>
+                    <div class="small text-muted">Section-level recognition summary</div>
+                </div>
+                ${rows.map((row) => `
+                    <div class="scanner-results-row">
+                        <strong>${escapeHtml(row.label)}</strong>
+                        <span class="small text-muted">${row.read} / ${row.expected}</span>
+                        <span class="badge ${row.review > 0 ? 'bg-warning text-dark' : 'bg-success'}">${row.review > 0 ? `Review ${row.review}` : 'Complete'}</span>
+                    </div>
+                `).join('')}
+            </div>
+        `;
     }
 
     async handleScannerImageSelect(event) {
@@ -5711,11 +6189,14 @@ class ScanCheckApp {
             this.selectedScanImages = queue;
             this.bulkScanResults = [];
             this.selectedScanImage = queue[0]?.dataUrl || null;
-        this.selectedInboxPaperIds = [];
-        this.selectedReceivedPaperId = null;
-        this.currentOcrResult = null;
+            this.selectedInboxPaperIds = [];
+            this.selectedReceivedPaperId = null;
+            this.currentOcrResult = null;
+            this.detectedScannerLayout = null;
+            this.scannerAiInputPreviewImage = null;
             if (this.selectedScanImage) {
                 this.setScannerPreviewImage(this.selectedScanImage, queue[0]?.name || 'Preview');
+                this.identifyScannerLayout(this.selectedScanImage);
             }
             this.renderBulkScanQueue();
             this.updateScannerScanButtonState();
@@ -5731,7 +6212,6 @@ class ScanCheckApp {
         preview.innerHTML = `<img src="${imageData}" class="img-fluid" alt="${escapeHtml(label)}">`;
     }
 
-
     getBubbleDebugAssetUrl(assetPath) {
         const rawPath = String(assetPath || '').trim();
         if (!rawPath) return null;
@@ -5739,7 +6219,6 @@ class ScanCheckApp {
         const apiPath = rawPath.startsWith('/uploads/') ? `/api${rawPath}` : rawPath;
         return scanCheckConfig.resolveAssetUrl(apiPath);
     }
-
 
     async validateImageQuality(base64) {
         const img = new Image();
@@ -5766,26 +6245,99 @@ class ScanCheckApp {
 
     rotateImage(deg) {
         this.imageRotation = (this.imageRotation + deg) % 360;
-        const img = document.getElementById('activeScannerImage');
-        if (img) img.style.transform = `rotate(${this.imageRotation}deg) scale(${this.imageZoom})`;
+        this.applyScannerImageTransform();
     }
 
     zoomImage(factor) {
         this.imageZoom *= factor;
-        this.imageZoom = Math.max(0.5, Math.min(3, this.imageZoom));
+        this.imageZoom = Math.max(0.4, Math.min(6, this.imageZoom));
+        this.applyScannerImageTransform();
+    }
+
+    applyScannerImageTransform() {
         const img = document.getElementById('activeScannerImage');
-        if (img) img.style.transform = `rotate(${this.imageRotation}deg) scale(${this.imageZoom})`;
+        const level = document.getElementById('scannerZoomLevel');
+        if (!img) return;
+        img.style.transform = `translate(${this.imagePanX}px, ${this.imagePanY}px) rotate(${this.imageRotation}deg) scale(${this.imageZoom})`;
+        if (level) level.textContent = `${Math.round(this.imageZoom * 100)}%`;
+    }
+
+    fitScannerPreviewImage() {
+        this.imageZoom = 1;
+        this.imagePanX = 0;
+        this.imagePanY = 0;
+        this.applyScannerImageTransform();
+    }
+
+    initScannerPreviewInteractions() {
+        const shell = document.getElementById('scannerImagePreviewShell');
+        if (!shell) return;
+
+        shell.onmousedown = (event) => {
+            if (event.button !== 0 || !document.getElementById('activeScannerImage')) return;
+            this.scannerImageDragging = true;
+            this.scannerImageDragStartX = event.clientX - this.imagePanX;
+            this.scannerImageDragStartY = event.clientY - this.imagePanY;
+            shell.style.cursor = 'grabbing';
+            event.preventDefault();
+        };
+
+        shell.onmousemove = (event) => {
+            if (!this.scannerImageDragging) return;
+            this.imagePanX = event.clientX - this.scannerImageDragStartX;
+            this.imagePanY = event.clientY - this.scannerImageDragStartY;
+            this.applyScannerImageTransform();
+        };
+
+        shell.onmouseup = () => {
+            this.scannerImageDragging = false;
+            shell.style.cursor = 'grab';
+        };
+
+        shell.onmouseleave = () => {
+            this.scannerImageDragging = false;
+            shell.style.cursor = 'grab';
+        };
+
+        shell.ontouchstart = (event) => {
+            const touch = event.touches?.[0];
+            if (!touch || !document.getElementById('activeScannerImage')) return;
+            this.scannerImageDragging = true;
+            this.scannerImageDragStartX = touch.clientX - this.imagePanX;
+            this.scannerImageDragStartY = touch.clientY - this.imagePanY;
+        };
+
+        shell.ontouchmove = (event) => {
+            if (!this.scannerImageDragging) return;
+            const touch = event.touches?.[0];
+            if (!touch) return;
+            event.preventDefault();
+            this.imagePanX = touch.clientX - this.scannerImageDragStartX;
+            this.imagePanY = touch.clientY - this.scannerImageDragStartY;
+            this.applyScannerImageTransform();
+        };
+
+        shell.ontouchend = () => {
+            this.scannerImageDragging = false;
+        };
+
+        shell.onwheel = (event) => {
+            if (!document.getElementById('activeScannerImage')) return;
+            event.preventDefault();
+            this.zoomImage(event.deltaY > 0 ? 0.9 : 1.1);
+        };
     }
 
     updateScannerScanButtonState() {
         const scanBtn = document.getElementById('startScanBtn');
         if (!scanBtn) return;
         const selectedQuizId = document.getElementById('scannerExamSelect')?.value || '';
+        const hasResolvedLayout = Boolean(this.detectedScannerLayout?.layoutId || selectedQuizId);
         const queueCount = Array.isArray(this.selectedScanImages) ? this.selectedScanImages.length : 0;
-        scanBtn.disabled = this.isBulkScanning || !(this.selectedScanImage && selectedQuizId);
+        scanBtn.disabled = this.isBulkScanning || !(this.selectedScanImage && hasResolvedLayout);
         scanBtn.innerHTML = queueCount > 1
             ? `<i class="fas fa-layer-group me-2"></i> Scan ${queueCount} Images`
-            : '<i class="fas fa-search me-2"></i> Scan Sheet';
+            : '<i class="fas fa-search me-2"></i> Scan Paper';
     }
 
     renderBulkScanQueue() {
@@ -5864,7 +6416,10 @@ class ScanCheckApp {
         if (!queue || !queue[index]) return;
         
         this.selectedScanImage = queue[index].dataUrl;
+        this.currentOcrResult = queue[index].result || null;
+        this.scannerAiInputPreviewImage = this.currentOcrResult?.aiInputPreview || this.currentOcrResult?.metrics?.aiInputPreview || null;
         this.setScannerPreviewImage(this.selectedScanImage, queue[index].name);
+        if (!this.currentOcrResult) this.identifyScannerLayout(this.selectedScanImage);
         this.renderBulkScanQueue();
     }
 
@@ -5944,6 +6499,175 @@ class ScanCheckApp {
         return status || fallbackText || '-';
     }
 
+    scannerSelectedQuizContext() {
+        const quizId = document.getElementById('scannerExamSelect')?.value || '';
+        const selectedQuiz = this.quizzes.find((quiz) => String(quiz.id) === String(quizId)) || null;
+        return {
+            quizId: quizId || null,
+            quiz: selectedQuiz,
+            questionCount: Number.parseInt(String(selectedQuiz?.questionCount || 100), 10) || 100,
+            subjects: this.getSubjectConfigForQuiz(selectedQuiz || quizId)
+        };
+    }
+
+    updateScannerStatusBadge(status = 'idle') {
+        const badge = document.getElementById('scannerStatusBadge');
+        if (!badge) return;
+        const normalized = String(status || 'idle').toLowerCase();
+        const map = {
+            idle: ['bg-secondary', 'Idle'],
+            processing: ['bg-primary', 'Processing'],
+            complete: ['bg-success', 'Complete'],
+            review: ['bg-warning text-dark', 'Needs Review'],
+            failed: ['bg-danger', 'Failed']
+        };
+        const [classes, label] = map[normalized] || map.idle;
+        badge.className = `badge ${classes}`;
+        badge.textContent = label;
+    }
+
+    setScannerStage(activeStage = '') {
+        const rows = document.querySelectorAll('.scanner-stage-row');
+        const order = ['prepare', 'layout', 'analyze', 'validate'];
+        const activeIndex = order.indexOf(activeStage);
+        rows.forEach((row) => {
+            const stage = row.dataset.stage;
+            const stageIndex = order.indexOf(stage);
+            const icon = row.querySelector('i');
+            row.classList.toggle('active', stage === activeStage);
+            row.classList.toggle('complete', activeIndex > stageIndex && stageIndex >= 0);
+            if (!icon) return;
+            if (activeIndex > stageIndex && stageIndex >= 0) {
+                icon.className = 'fas fa-check-circle';
+            } else if (stage === activeStage) {
+                icon.className = 'fas fa-circle-notch fa-spin';
+            } else {
+                icon.className = 'far fa-circle';
+            }
+        });
+    }
+
+    setScannerAiStatus(status = 'ready') {
+        const badge = document.getElementById('scannerAiStatusBadge');
+        if (!badge) return;
+        const normalized = String(status || 'ready').toLowerCase();
+        const map = {
+            ready: ['bg-success', 'Ready'],
+            checking: ['bg-primary', 'Checking'],
+            unavailable: ['bg-danger', 'Unavailable'],
+            processing: ['bg-primary', 'Processing']
+        };
+        const [classes, label] = map[normalized] || map.ready;
+        badge.className = `badge ${classes}`;
+        badge.textContent = label;
+    }
+
+    renderScannerLayoutDetection(result = null, state = 'idle') {
+        const card = document.getElementById('scannerDetectedExamCard');
+        const name = document.getElementById('scannerDetectedExamName');
+        const count = document.getElementById('scannerDetectedQuestionCount');
+        const source = document.getElementById('scannerDetectedSource');
+        const manualLabel = document.getElementById('scannerManualOverrideLabel');
+        const help = document.getElementById('scannerExamHelpText');
+        const select = document.getElementById('scannerExamSelect');
+
+        if (state === 'checking') {
+            if (card) card.classList.remove('d-none');
+            if (name) name.textContent = 'Reading sheet QR...';
+            if (count) count.textContent = '-';
+            if (source) source.textContent = 'Identifying layout';
+            if (manualLabel) manualLabel.classList.add('text-muted');
+            if (help) help.textContent = 'Manual override remains available if the QR cannot be read.';
+            return;
+        }
+
+        if (result?.success) {
+            if (card) card.classList.remove('d-none');
+            if (name) name.textContent = result.examName || result.examId || result.layoutId || 'Detected Exam';
+            if (count) count.textContent = result.questionCount || '-';
+            if (source) source.textContent = result.detectedFromQr ? 'Detected from QR' : 'Resolved from layout';
+            if (manualLabel) manualLabel.classList.add('text-muted');
+            if (help) help.textContent = 'Manual override is optional. Use it only if the detected exam is wrong.';
+            if (select && result.quizId) {
+                select.value = String(result.quizId);
+                localStorage.setItem('scancheck_selected_scanner_quiz', String(result.quizId));
+            }
+            return;
+        }
+
+        if (card) card.classList.add('d-none');
+        if (manualLabel) manualLabel.classList.remove('text-muted');
+        if (help) {
+            help.textContent = state === 'failed'
+                ? 'Could not identify sheet layout. Select the target exam manually.'
+                : 'Used when QR/layout detection needs manual confirmation.';
+        }
+    }
+
+    friendlyScanError(error) {
+        const code = String(error?.code || error?.payload?.code || '').toUpperCase();
+        const message = String(error?.payload?.error || error?.message || error || '').toLowerCase();
+        if (message.includes('layout identification') || message.includes('qr could not')) {
+            return 'Could not identify sheet layout. Use Manual Override if this is a valid ScanCheck sheet.';
+        }
+        if (code.includes('MISSING_API_KEY') || code.includes('AUTH') || message.includes('api key') || message.includes('authentication') || message.includes('quota') || message.includes('rate limit')) {
+            return 'AI scanner unavailable. Check the Gemini API key, billing, or connection.';
+        }
+        if (code.includes('TIMEOUT') || message.includes('timeout') || message.includes('timed out')) {
+            return 'AI scanner timed out. Try again, or use fewer verification calls in AI settings.';
+        }
+        if (code.includes('INVALID_RESPONSE') || code.includes('MALFORMED')) {
+            return 'AI scanner returned an unreadable response. Try scanning again.';
+        }
+        if (message.includes('image') || message.includes('payload')) {
+            return 'The uploaded image could not be processed.';
+        }
+        return 'The paper could not be scanned. Please try a clearer image.';
+    }
+
+    async identifyScannerLayout(imageData) {
+        if (!imageData) return null;
+        this.detectedScannerLayout = null;
+        this.renderScannerLayoutDetection(null, 'checking');
+        this.setScannerAiStatus('checking');
+        this.updateScannerScanButtonState();
+        try {
+            const context = this.scannerSelectedQuizContext();
+            const response = await scanCheckConfig.apiCall('/api/ai-omr/identify-layout', {
+                method: 'POST',
+                body: JSON.stringify({
+                    photo: imageData,
+                    quizId: context.quizId,
+                    questionCount: context.questionCount,
+                    subjects: context.subjects
+                })
+            }, 'identifyLayout');
+            this.detectedScannerLayout = response?.success ? response : null;
+            this.renderScannerLayoutDetection(this.detectedScannerLayout, this.detectedScannerLayout ? 'success' : 'failed');
+            this.setScannerAiStatus('ready');
+            this.updateScannerScanButtonState();
+            return this.detectedScannerLayout;
+        } catch (error) {
+            console.warn('Layout identification failed:', error?.message || error);
+            this.detectedScannerLayout = null;
+            this.renderScannerLayoutDetection(null, 'failed');
+            this.setScannerAiStatus('ready');
+            this.updateScannerScanButtonState();
+            return null;
+        }
+    }
+
+    scannerResultStatus(result = {}) {
+        const metrics = result.templateMetrics || result.metrics || {};
+        const stateCounts = metrics.stateCounts || {};
+        const metricReviewCount = Array.isArray(result.questionMetrics)
+            ? result.questionMetrics.filter((metric) => metric.needsReview || String(metric.state || '').toLowerCase() === 'uncertain').length
+            : Number(stateCounts.uncertain || 0);
+        const needsReview = Array.isArray(result.needsReview) ? result.needsReview.length : metricReviewCount;
+        if (!result?.success) return 'Failed';
+        return needsReview > 0 ? 'Needs Review' : 'Complete';
+    }
+
     updateScannerPipelineSummary(result = null) {
         const setText = (id, value) => {
             const el = document.getElementById(id);
@@ -5953,56 +6677,37 @@ class ScanCheckApp {
         if (!result) {
             [
                 'scannerMetaExamId',
-                'scannerMetaScanMode',
+                'scannerMetaQuestionsRead',
+                'scannerMetaNeedsReview',
+                'scannerMetaScanStatus',
+                'scannerMetaProcessingTime',
                 'scannerMetaWorkerUsed',
-                'scannerMetaLayoutFound',
-                'scannerMetaLayoutId',
-                'scannerMetaScore',
-                'scannerMetaBubbles',
-                'scannerMetaMapping',
-                'scannerMetaEntryGroup',
-                'scannerMetaEquityGroup'
             ].forEach((id) => setText(id, '-'));
+            this.updateScannerStatusBadge('idle');
             return;
         }
 
-        const layoutFound = Object.prototype.hasOwnProperty.call(result, 'layoutFound')
-            ? (result.layoutFound ? 'true' : 'false')
-            : '-';
         const examId = this.getScanResultExamId(result);
-        const equityGroup = result.equityGroupResult || result.equityGroup;
-        const mappingConfidence = Number(result.mappingConfidence);
         const metrics = result.templateMetrics || result.metrics || {};
-        const detectedBubbleCount = Number(
-            result.detectedBubbleCount
-            ?? metrics.detectedBubbleCount
-            ?? result.bubbleCount
-            ?? result.count
-            ?? (Array.isArray(result.detectedBubbles) ? result.detectedBubbles.length : undefined)
-            ?? (Array.isArray(result.bubbles) ? result.bubbles.length : undefined)
-        ) || 0;
-        const mappedBubbleCount = Number(
-            result.mappedBubbleCount
-            ?? metrics.mappedBubbleCount
-            ?? (Array.isArray(result.mappedBubbles) ? result.mappedBubbles.length : undefined)
-        ) || 0;
+        const stateCounts = metrics.stateCounts || {};
+        const returnedCount = Number(metrics.returnedQuestions || result.activeQuestionCount || result.questionMetrics?.length || 0) || 0;
+        const totalQuestions = Number(result.totalTemplateQuestions || result.activeQuestionCount || returnedCount) || returnedCount;
+        const reviewCount = Array.isArray(result.needsReview)
+            ? result.needsReview.length
+            : (Array.isArray(result.questionMetrics)
+                ? result.questionMetrics.filter((metric) => metric.needsReview || String(metric.state || '').toLowerCase() === 'uncertain').length
+                : Number(stateCounts.uncertain || 0));
+        const status = this.scannerResultStatus(result);
+        const processingMs = Number(metrics.processingTimeMs || metrics.latencyMs || result.processingTimeMs);
 
-        setText('scannerMetaExamId', examId);
-        setText('scannerMetaScanMode', result.scanMode);
-        setText('scannerMetaWorkerUsed', result.workerUsed || result.omrEngineUsed);
-        setText('scannerMetaLayoutFound', layoutFound);
-        setText('scannerMetaLayoutId', result.layoutId || examId);
-        setText('scannerMetaScore', this.formatScanScoreSummary(result));
-        setText(
-            'scannerMetaBubbles',
-            `${detectedBubbleCount} detected / ${mappedBubbleCount} mapped`
-        );
-        setText(
-            'scannerMetaMapping',
-            Number.isFinite(mappingConfidence) ? `${Math.round(mappingConfidence * 100)}%` : '-'
-        );
-        setText('scannerMetaEntryGroup', this.formatChoiceGroupSummary(result.entryGroup, result.entryType));
-        setText('scannerMetaEquityGroup', this.formatChoiceGroupSummary(equityGroup, result.equityGroup));
+        const selectedQuiz = this.scannerSelectedQuizContext().quiz;
+        setText('scannerMetaExamId', result.examName || selectedQuiz?.title || examId || result.layoutId || '-');
+        setText('scannerMetaQuestionsRead', totalQuestions > 0 ? `${returnedCount}/${totalQuestions}` : '-');
+        setText('scannerMetaNeedsReview', reviewCount);
+        setText('scannerMetaScanStatus', status);
+        setText('scannerMetaProcessingTime', Number.isFinite(processingMs) && processingMs > 0 ? `${(processingMs / 1000).toFixed(1)} s` : '-');
+        setText('scannerMetaWorkerUsed', 'AI Vision');
+        this.updateScannerStatusBadge(status === 'Needs Review' ? 'review' : 'complete');
     }
 
     openLastScanResult() {
@@ -6015,25 +6720,27 @@ class ScanCheckApp {
     }
 
     getScannerOcrRequestPayload(imageData, options = {}) {
-        const quizId = document.getElementById('scannerExamSelect')?.value || null;
-        const selectedQuiz = this.quizzes.find((quiz) => String(quiz.id) === String(quizId));
-        const questionCount = Number.parseInt(String(selectedQuiz?.questionCount || 100), 10) || 100;
-        const selectedQuizSubjects = this.getSubjectConfigForQuiz(selectedQuiz || quizId);
+        const context = this.scannerSelectedQuizContext();
+        const detected = this.detectedScannerLayout || {};
+        const quizId = context.quizId || detected.quizId || null;
+        const questionCount = Number.parseInt(String(detected.questionCount || context.questionCount || 100), 10) || 100;
         return {
             photo: imageData,
+            layoutId: detected.layoutId || null,
             quizId,
             sourceReceivedPaperId: options.sourceReceivedPaperId || null,
             rotation: options.rotation ?? this.imageRotation,
             sheetFormat: 'multi-subject',
             questionCount,
-            subjects: selectedQuizSubjects
+            subjects: context.subjects
         };
     }
 
     async processScannerImageData(imageData, options = {}) {
+        const uploadImage = await this.compressScannerImageForUpload(imageData);
         return this.apiCallWithAuth('/api/ocr', {
             method: 'POST',
-            body: JSON.stringify(this.getScannerOcrRequestPayload(imageData, options))
+            body: JSON.stringify(this.getScannerOcrRequestPayload(uploadImage, options))
         }, options.context || 'processOCR');
     }
 
@@ -6053,6 +6760,7 @@ class ScanCheckApp {
         }
 
         this.currentOcrResult = result;
+        this.scannerAiInputPreviewImage = result.aiInputPreview || result.templateMetrics?.aiInputPreview || result.metrics?.aiInputPreview || this.scannerAiInputPreviewImage || null;
         // Keep track of source ID in result so it's not lost
         if (options.sourceReceivedPaperId) {
             this.currentOcrResult.sourceReceivedPaperId = options.sourceReceivedPaperId;
@@ -6063,34 +6771,52 @@ class ScanCheckApp {
         this.updateLastResultButtonState();
         this.updateScannerPipelineSummary(result);
         const qr = result.barcodeData || {};
-        const qrSheetId = String(qr.sheetId || qr.sheet_id || '').trim();
+        const firstNonEmpty = (...values) => {
+            for (const value of values) {
+                const text = String(value ?? '').trim();
+                if (text) return text;
+            }
+            return '';
+        };
+        const qrSheetId = String(result.sheetId || result.sheet_id || qr.sheetId || qr.sheet_id || '').trim();
         const resolvedPaperId = qrSheetId;
+        const setPreviewField = (id, value, invalid = false) => {
+            const element = document.getElementById(id);
+            if (!element) return;
+            element.value = value || '';
+            element.classList.toggle('is-invalid', Boolean(invalid));
+        };
+        const topField = (fieldName) => result.topFields?.[fieldName] || result.classificationFields?.[fieldName] || {};
 
         // Auto-fill form fields
-        if (document.getElementById('ocrStudentName')) document.getElementById('ocrStudentName').value = result.studentName || '';
+        if (document.getElementById('ocrStudentName')) document.getElementById('ocrStudentName').value = firstNonEmpty(result.studentName, result.student_name, qr.studentName, qr.student_name, qr.name);
         if (document.getElementById('ocrPaperId')) document.getElementById('ocrPaperId').value = resolvedPaperId;
-        if (document.getElementById('ocrStudentCourse')) document.getElementById('ocrStudentCourse').value = result.course || '';
-        if (document.getElementById('ocrStudentAge')) document.getElementById('ocrStudentAge').value = result.age || '';
-        if (document.getElementById('ocrRoomNo')) document.getElementById('ocrRoomNo').value = result.roomNo || '';
-        if (document.getElementById('ocrSeatNo')) document.getElementById('ocrSeatNo').value = result.seatNo || '';
+        if (document.getElementById('ocrStudentCourse')) document.getElementById('ocrStudentCourse').value = firstNonEmpty(result.course, qr.course);
+        if (document.getElementById('ocrStudentAge')) document.getElementById('ocrStudentAge').value = firstNonEmpty(result.age, qr.age);
+        if (document.getElementById('ocrRoomNo')) document.getElementById('ocrRoomNo').value = firstNonEmpty(result.roomNo, result.room_no, qr.roomNo, qr.room_no, qr.room);
+        if (document.getElementById('ocrSeatNo')) document.getElementById('ocrSeatNo').value = firstNonEmpty(result.seatNo, result.seat_no, qr.seatNo, qr.seat_no, qr.seat);
         if (document.getElementById('ocrDateTime')) {
-            const dt = result.dateTime || qr.dateTime || qr.date_time || '';
+            const dt = firstNonEmpty(result.dateTime, result.date_time, qr.dateTime, qr.date_time);
             document.getElementById('ocrDateTime').value = dt;
         }
         if (document.getElementById('ocrScore')) document.getElementById('ocrScore').value = result.score || 0;
 
+        if (document.getElementById('ocrSex')) {
+            const sexField = topField('sex');
+            setPreviewField('ocrSex', firstNonEmpty(result.sex, qr.sex, qr.gender, sexField.value), sexField.invalid);
+        }
         if (document.getElementById('ocrEntryType')) {
             const eg = result.entryGroup || {};
-            document.getElementById('ocrEntryType').value = eg.studentType || result.entryType || 'New Student';
+            setPreviewField('ocrEntryType', eg.studentType || result.entryType || 'New Student', topField('studentType').invalid);
         }
         if (document.getElementById('ocrResidencyType')) {
             const eg = result.entryGroup || {};
-            document.getElementById('ocrResidencyType').value = eg.residencyType || result.residencyType || 'Passinhon';
+            setPreviewField('ocrResidencyType', eg.residencyType || result.residencyType || 'Passinhon', topField('residencyType').invalid);
         }
         if (document.getElementById('ocrEquityGroup')) {
             const eq = result.equityGroupResult || {};
             const eqValues = Array.isArray(eq.values) ? eq.values.filter(Boolean) : [];
-            document.getElementById('ocrEquityGroup').value = eqValues.length ? eqValues[0] : (result.equityGroup || 'None');
+            setPreviewField('ocrEquityGroup', eqValues.length ? eqValues[0] : (result.equityGroup || eq.value || 'None'), topField('equityGroup').invalid);
         }
         if (document.getElementById('ocrRawText')) document.getElementById('ocrRawText').value = result.rawText || '';
 
@@ -6100,6 +6826,7 @@ class ScanCheckApp {
         this.updateConfidenceAnalysis(result);
         this.updateDebugPreview(result.debugImagePath || null);
         this.renderImagePreview(result);
+        this.setScannerPreviewMode(this.scannerPreviewMode || 'results', { preserveTransform: true, skipValidation: true });
 
         if (!options.silent) {
             if (resolvedPaperId) {
@@ -6134,6 +6861,12 @@ class ScanCheckApp {
 
     clearCurrentOcrResultOnly() {
         this.currentOcrResult = null;
+        this.scannerAiInputPreviewImage = null;
+        if (this.scannerPreviewMode !== 'original') {
+            this.setScannerPreviewMode('original');
+        } else {
+            this.setScannerPreviewMode('original', { preserveTransform: true, skipValidation: true });
+        }
 
         if (document.getElementById('ocrStudentName')) document.getElementById('ocrStudentName').value = '';
         if (document.getElementById('ocrPaperId')) document.getElementById('ocrPaperId').value = '';
@@ -6147,6 +6880,8 @@ class ScanCheckApp {
         if (document.getElementById('ocrRawTextToggleBtn')) document.getElementById('ocrRawTextToggleBtn').textContent = 'Show Raw Data';
         if (document.getElementById('ocrShadedAnswers')) document.getElementById('ocrShadedAnswers').textContent = 'None';
         if (document.getElementById('ocrDebugLog')) document.getElementById('ocrDebugLog').textContent = 'No debug data yet.';
+        ['ocrSex', 'ocrEntryType', 'ocrResidencyType', 'ocrEquityGroup'].forEach((id) => document.getElementById(id)?.classList.remove('is-invalid'));
+        if (document.getElementById('ocrSex')) document.getElementById('ocrSex').value = '';
         if (document.getElementById('ocrEntryType')) document.getElementById('ocrEntryType').value = '';
         if (document.getElementById('ocrResidencyType')) document.getElementById('ocrResidencyType').value = '';
         if (document.getElementById('ocrEquityGroup')) document.getElementById('ocrEquityGroup').value = '';
@@ -6174,7 +6909,7 @@ class ScanCheckApp {
     normalizeManualAnswer(value) {
         const v = String(value || '').trim().toUpperCase();
         if (!v || v === '-' || v === '\u2014' || v === 'BLANK') return '';
-        if (v === 'M' || v === 'MULTIPLE') return 'MULTIPLE';
+        if (v === 'M' || v === 'MULTIPLE' || v === 'MULT' || v.startsWith('MULT ')) return 'MULTIPLE';
         // Support A-F for broader exam formats
         if (/^[A-F]$/.test(v)) return v;
         return '';
@@ -6475,8 +7210,15 @@ class ScanCheckApp {
         this.isBulkScanning = false;
         this.selectedReceivedPaperId = null;
         this.currentOcrResult = null;
+        this.detectedScannerLayout = null;
+        this.scannerPreviewMode = 'original';
+        this.scannerOriginalPreviewImage = null;
+        this.scannerAiInputPreviewImage = null;
         this.imageRotation = 0;
         this.imageZoom = 1;
+        this.imagePanX = 0;
+        this.imagePanY = 0;
+        this.scannerImageDragging = false;
 
         const preview = document.getElementById('scannerImagePreview');
         if (preview) {
@@ -6492,9 +7234,14 @@ class ScanCheckApp {
 
         const controls = document.getElementById('scannerImageControls');
         if (controls) controls.classList.add('d-none');
+        const zoomLevel = document.getElementById('scannerZoomLevel');
+        if (zoomLevel) zoomLevel.textContent = '100%';
 
         const input = document.getElementById('scannerImageInput');
         if (input) input.value = '';
+        this.renderScannerLayoutDetection(null, 'idle');
+        this.setScannerAiStatus('ready');
+        this.setScannerPreviewMode('original');
         if (document.getElementById('scannerStudentName')) document.getElementById('scannerStudentName').value = '';
         if (document.getElementById('scannerStudentCourse')) document.getElementById('scannerStudentCourse').value = '';
         if (document.getElementById('scannerStudentAge')) document.getElementById('scannerStudentAge').value = '';
@@ -6523,6 +7270,8 @@ class ScanCheckApp {
         if (document.getElementById('ocrRawTextToggleBtn')) document.getElementById('ocrRawTextToggleBtn').textContent = 'Show Raw Data';
         if (document.getElementById('ocrShadedAnswers')) document.getElementById('ocrShadedAnswers').textContent = 'None';
         if (document.getElementById('ocrDebugLog')) document.getElementById('ocrDebugLog').textContent = 'No debug data yet.';
+        ['ocrSex', 'ocrEntryType', 'ocrResidencyType', 'ocrEquityGroup'].forEach((id) => document.getElementById(id)?.classList.remove('is-invalid'));
+        if (document.getElementById('ocrSex')) document.getElementById('ocrSex').value = '';
         if (document.getElementById('ocrEntryType')) document.getElementById('ocrEntryType').value = 'New Student';
         if (document.getElementById('ocrResidencyType')) document.getElementById('ocrResidencyType').value = 'Passinhon';
         if (document.getElementById('ocrEquityGroup')) document.getElementById('ocrEquityGroup').value = 'None';
@@ -6570,16 +7319,19 @@ class ScanCheckApp {
 
         const quizId = document.getElementById('scannerExamSelect')?.value || null;
         if (!quizId) {
-            this.showToast('Please select a target exam first', 'warning');
+            this.showToast('Select a manual exam override before bulk scanning.', 'warning');
             return;
         }
 
         const overlay = document.getElementById('scannerOverlay');
-        const progressBar = document.getElementById('scanningProgressBar');
+        const progressBar = document.getElementById('bulkScanProgressBar');
         if (overlay) {
             overlay.classList.remove('d-none');
             overlay.classList.add('d-flex');
         }
+        this.updateScannerStatusBadge('processing');
+        this.setScannerAiStatus('processing');
+        this.setScannerStage('prepare');
 
         this.isBulkScanning = true;
         this.updateScannerScanButtonState();
@@ -6602,12 +7354,13 @@ class ScanCheckApp {
                 }
                 await new Promise(resolve => setTimeout(resolve, 5000));
                 if (overlay) {
-                    overlay.querySelector('h6').textContent = `Scanning Sheet...`;
+                    overlay.querySelector('h6').textContent = `Scanning Paper...`;
                 }
             }
 
             const item = queue[index];
             item.status = 'running';
+            this.setScannerStage('analyze');
             this.selectedScanImage = item.dataUrl;
             this.setScannerPreviewImage(item.dataUrl, item.name);
             this.renderBulkScanQueue();
@@ -6648,6 +7401,8 @@ class ScanCheckApp {
         this.isBulkScanning = false;
         this.updateScannerScanButtonState();
         this.updateLastResultButtonState();
+        this.setScannerAiStatus('ready');
+        this.updateScannerStatusBadge(successCount > 0 ? 'complete' : 'failed');
 
         setTimeout(() => {
             if (overlay) {
@@ -6678,67 +7433,56 @@ class ScanCheckApp {
             return;
         }
 
-        const quizId = document.getElementById('scannerExamSelect')?.value || null;
-        if (!quizId) {
-            this.showToast('Please select a target exam first', 'warning');
+        const context = this.scannerSelectedQuizContext();
+        if (!this.detectedScannerLayout?.layoutId && !context.quizId) {
+            this.showToast('Could not identify sheet layout. Select the target exam manually.', 'warning');
             return;
         }
 
         const overlay = document.getElementById('scannerOverlay');
-        const progressBar = document.getElementById('scanningProgressBar');
         if (overlay) {
             overlay.classList.remove('d-none');
             overlay.classList.add('d-flex');
         }
-
-        let progress = 0;
-        const progressInterval = setInterval(() => {
-            progress += Math.random() * 10;
-            if (progress > 95) progress = 95;
-            if (progressBar) progressBar.style.width = `${progress}%`;
-        }, 200);
+        this.updateScannerStatusBadge('processing');
+        this.setScannerAiStatus('processing');
+        this.setScannerStage('prepare');
 
         try {
-            const sheetFormat = 'multi-subject';
-            const selectedQuiz = this.quizzes.find((quiz) => String(quiz.id) === String(quizId));
-            const questionCount = Number.parseInt(String(selectedQuiz?.questionCount || 100), 10) || 100;
-            const selectedQuizSubjects = this.getSubjectConfigForQuiz(selectedQuiz || quizId);
-            const result = await this.apiCallWithAuth('/api/ocr', {
-                method: 'POST',
-                body: JSON.stringify({
-                    photo: this.selectedScanImage,
-                    quizId: quizId,
-                    sourceReceivedPaperId: this.selectedReceivedPaperId,
-                    rotation: this.imageRotation,
-                    sheetFormat,
-                    questionCount,
-                    subjects: selectedQuizSubjects
-                })
-            }, 'processOCR');
-
-            clearInterval(progressInterval);
-            if (progressBar) progressBar.style.width = '100%';
-            
-            setTimeout(() => {
-                if (overlay) {
-                    overlay.classList.add('d-none');
-                    overlay.classList.remove('d-flex');
-                }
-                if (progressBar) progressBar.style.width = '0%';
-            }, 500);
+            this.setScannerStage('layout');
+            if (!this.detectedScannerLayout?.layoutId) {
+                await this.identifyScannerLayout(this.selectedScanImage);
+            }
+            this.setScannerStage('analyze');
+            const result = await this.processScannerImageData(this.selectedScanImage, {
+                rotation: this.imageRotation,
+                sourceReceivedPaperId: this.selectedReceivedPaperId,
+                context: 'processOCR'
+            });
+            this.setScannerStage('validate');
 
             if (result.success) {
                 this.currentOcrResult = result;
+                this.scannerAiInputPreviewImage = result.aiInputPreview || result.templateMetrics?.aiInputPreview || result.metrics?.aiInputPreview || null;
                 console.log(`[OCR Response] requestId=${result.requestId} hash=${(result.imageHash || '').slice(0, 12)} debugPath=${result.debugImagePath || ''}`);
                 
                 this.updateLastResultButtonState();
+                this.updateScannerPipelineSummary(result);
                 
                 // Auto-fill Scanner Student Information (Optional) on main workspace
-                if (document.getElementById('scannerStudentName')) document.getElementById('scannerStudentName').value = result.studentName || '';
-                if (document.getElementById('scannerStudentCourse')) document.getElementById('scannerStudentCourse').value = result.course || '';
-                if (document.getElementById('scannerStudentAge')) document.getElementById('scannerStudentAge').value = result.age || '';
-                if (document.getElementById('scannerRoomNo')) document.getElementById('scannerRoomNo').value = result.roomNo || '';
-                if (document.getElementById('scannerSeatNo')) document.getElementById('scannerSeatNo').value = result.seatNo || '';
+                const qr = result.barcodeData || {};
+                const firstNonEmpty = (...values) => {
+                    for (const value of values) {
+                        const text = String(value ?? '').trim();
+                        if (text) return text;
+                    }
+                    return '';
+                };
+                if (document.getElementById('scannerStudentName')) document.getElementById('scannerStudentName').value = firstNonEmpty(result.studentName, result.student_name, qr.studentName, qr.student_name, qr.name);
+                if (document.getElementById('scannerStudentCourse')) document.getElementById('scannerStudentCourse').value = firstNonEmpty(result.course, qr.course);
+                if (document.getElementById('scannerStudentAge')) document.getElementById('scannerStudentAge').value = firstNonEmpty(result.age, qr.age);
+                if (document.getElementById('scannerRoomNo')) document.getElementById('scannerRoomNo').value = firstNonEmpty(result.roomNo, result.room_no, qr.roomNo, qr.room_no, qr.room);
+                if (document.getElementById('scannerSeatNo')) document.getElementById('scannerSeatNo').value = firstNonEmpty(result.seatNo, result.seat_no, qr.seatNo, qr.seat_no, qr.seat);
                 if (document.getElementById('scannerEntryType')) {
                     const eg = result.entryGroup || {};
                     document.getElementById('scannerEntryType').value = eg.studentType || result.entryType || '';
@@ -6746,6 +7490,7 @@ class ScanCheckApp {
                 if (document.getElementById('scannerEquityGroup') && result.equityGroup) document.getElementById('scannerEquityGroup').value = result.equityGroup;
 
                 // Present result in modal
+                this.setScannerPreviewMode('results');
                 this.presentOcrResult(result, { showModal: true });
                 return;
             }
@@ -6763,16 +7508,18 @@ class ScanCheckApp {
                     true
                 );
             } else {
-                this.showToast('Invalid OMR sheet detected. Please upload a clear exam paper.', 'danger');
+                this.showToast('The uploaded image could not be processed.', 'danger');
             }
         } catch (error) {
-            clearInterval(progressInterval);
-            console.error('OMR Error:', error);
+            console.error('AI Vision scan error:', error);
+            this.updateScannerStatusBadge('failed');
+            this.showToast(this.friendlyScanError(error), 'danger');
+        } finally {
+            this.setScannerAiStatus('ready');
             if (overlay) {
                 overlay.classList.add('d-none');
                 overlay.classList.remove('d-flex');
             }
-            this.showToast('Error during scanning: ' + error.message, 'danger');
         }
     }
 
@@ -6785,7 +7532,7 @@ class ScanCheckApp {
                 <div class="empty-state py-5">
                     <i class="fas fa-search empty-state-icon"></i>
                     <h6 class="empty-state-title">No answers detected</h6>
-                    <p class="empty-state-description small">The OMR scanner couldn't find any marked bubbles.</p>
+                    <p class="empty-state-description small">AI Vision did not return any answer records for this scan.</p>
                 </div>
             `;
             return;
@@ -6820,13 +7567,21 @@ class ScanCheckApp {
                     const i = entry.originalIndex;
                     const conf = confidence[i] || 1.0;
                     const metric = entry.metric || null;
+                    const metricState = String(metric?.state || '').trim().toLowerCase();
+                    const displayAnswer = formatOcrAnswerDisplay(ans, metric);
                     const displayQ = entry.displayQuestionNumber || (visibleIndex + 1);
                     const correctAns = correctAnswers[displayQ - 1] || '';
                     
                     let statusClass = 'border-primary';
                     let bgClass = 'bg-white';
                     
-                    if (!ans) {
+                    if (metricState === 'multiple') {
+                        statusClass = 'border-danger shadow-sm';
+                        bgClass = 'bg-danger bg-opacity-10';
+                    } else if (metricState === 'uncertain' || metric?.needsReview) {
+                        statusClass = 'border-warning shadow-sm';
+                        bgClass = 'bg-warning bg-opacity-10';
+                    } else if (metricState === 'blank' || !ans) {
                         statusClass = 'border-secondary opacity-50';
                         bgClass = 'bg-light';
                     } else if (conf < 0.8) {
@@ -6842,7 +7597,6 @@ class ScanCheckApp {
                             `<i class="fas fa-times-circle text-danger ms-1" title="Key: ${correctAns}"></i>`;
                     }
 
-                    const isMultiple = String(ans || '').toUpperCase() === 'MULTIPLE';
                     return `
                         <div class="col">
                             <div class="card h-100 border ${statusClass} ${bgClass} transition-all">
@@ -6850,11 +7604,12 @@ class ScanCheckApp {
                                     <div class="x-small fw-bold text-muted mb-1 d-flex justify-content-center align-items-center">
                                         Q${displayQ} ${feedbackIcon}
                                     </div>
-                                    <input type="text" class="form-control form-control-sm text-center fw-bold border-0 bg-transparent p-0 ocr-answer-input ${isMultiple ? 'text-danger' : 'text-primary'}" 
+                                    <input type="text" class="form-control form-control-sm text-center fw-bold border-0 bg-transparent p-0 ocr-answer-input ${displayAnswer.className}" 
                                            style="font-size: 1.1rem;"
-                                           value="${isMultiple ? 'MULT' : (ans || '—')}" 
+                                           value="${escapeHtml(displayAnswer.value)}"
+                                           title="${escapeHtml(displayAnswer.title)}"
                                            data-index="${i}" 
-                                           onfocus="if (this.value === '—') this.value = ''"
+                                           onfocus="if (this.value === '—' || this.value === 'Blank' || this.value === 'Review' || this.value.startsWith('MULT')) this.value = ''"
                                            oninput="app.onAnswerEdit(this, ${i})">
                                 </div>
                             </div>
@@ -6945,7 +7700,7 @@ class ScanCheckApp {
             `[Quality] scan=${qualityPct}% alignment=${alignmentText}`,
             `[Coverage] detected=${shadedAnswers.length}/${Math.max(activeOrdinal, Number(result.activeQuestionCount || 0))} (${coveragePct}%)`,
             `[QR Status] ${result.barcodeStatus || 'none'}`,
-            `[QR Data] sheetId=${qr.sheetId || '-'} | studentId=${qr.studentId || '-'} | examId=${qr.examId || '-'}`,
+            `[QR Data] sheetId=${qr.sheetId || qr.sheet_id || '-'} | examId=${qr.examId || qr.exam_id || '-'}`,
             `[Bubble Fields] entryType=${result.entryType || '-'} | equityGroup=${result.equityGroup || '-'}`,
             `[Summary] scanned=${shadedAnswers.length}/${Math.max(activeOrdinal, Number(result.activeQuestionCount || 0))} | ambiguous=${ambiguousAnswers.length}`
         ];
@@ -6968,7 +7723,6 @@ class ScanCheckApp {
             rawTextEl.value = fullLog;
         }
     }
-
 
     updateConfidenceAnalysis(resultOrConfidence, alignmentConfidence = 0) {
         const qualityBadge = document.getElementById('ocrQualityBadge');
@@ -7010,7 +7764,7 @@ class ScanCheckApp {
             if (qrStatus === 'qr_success' || qrStatus === 'success') {
                 qrBadge.innerHTML = '<span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 px-2 py-1 rounded-pill"><i class="fas fa-qrcode me-1"></i> QR Verified</span>';
             } else {
-                qrBadge.innerHTML = '<span class="badge bg-secondary bg-opacity-10 text-secondary border border-secondary border-opacity-25 px-2 py-1 rounded-pill"><i class="fas fa-search me-1"></i> OMR Only</span>';
+                qrBadge.innerHTML = '<span class="badge bg-secondary bg-opacity-10 text-secondary border border-secondary border-opacity-25 px-2 py-1 rounded-pill"><i class="fas fa-list-check me-1"></i> Selected Layout</span>';
             }
         }
 
@@ -7083,7 +7837,7 @@ class ScanCheckApp {
                 body: JSON.stringify({
                     quiz_id: quizId,
                     student_name: studentName,
-                    student_id: paperId || `MANUAL-${Date.now()}`,
+                    sheet_id: paperId,
                     course,
                     subject: '',
                     section: '',
@@ -7140,7 +7894,6 @@ class ScanCheckApp {
             // Error already handled by apiCallWithAuth
         }
     }
-
 
     zoomEditImage(factor) {
         this.editImageScale *= factor;
@@ -7227,7 +7980,7 @@ class ScanCheckApp {
 
         document.getElementById('editRecordId').value = record.id;
         document.getElementById('editStudentName').value = record.student_name || '';
-        document.getElementById('editStudentId').value = record.student_id || '';
+        document.getElementById('editStudentId').value = record.sheet_id || '';
         document.getElementById('editCourse').value = record.course || '';
         document.getElementById('editAge').value = record.age || '';
         document.getElementById('editRoomNo').value = record.room_no || '';
@@ -7309,7 +8062,7 @@ class ScanCheckApp {
 
         const body = {
             studentName: document.getElementById('editStudentName').value,
-            studentId: document.getElementById('editStudentId').value,
+            sheetId: document.getElementById('editStudentId').value,
             course: document.getElementById('editCourse').value,
             subject: '',
             section: '',
@@ -7361,7 +8114,6 @@ class ScanCheckApp {
             // Error already handled
         }
     }
-
 
     populateBarcodePage() {
         this.ensureGeneratedQrMetadata();
@@ -7520,7 +8272,6 @@ class ScanCheckApp {
                 return {
                     ...student,
                     sheetId,
-                    studentId: sheetId,
                     examId: batchExamId,
                     roomNo: student.roomNo || String(Math.floor(index / 20) + 1),
                     seatNo: student.seatNo || String((index % 20) + 1),
@@ -7562,7 +8313,7 @@ class ScanCheckApp {
         const courseLogoMap = {
             'Bachelor of Science in Criminology': 'Bachelor of Science in Criminology.png',
             'Bachelor of Elementary Education': 'Bachelor of Elementary Education.png',
-            'Bachelor of Secondary Education': 'Bachelor of Secondary Education copy.png',
+            'Bachelor of Secondary Education': 'pcc.png',
             'Bachelor of Science in Hospitality Management': 'Bachelor of Science in Hospitality Management.png',
             'Bachelor of Science in Business Administration': 'Bachelor of Science in Business Administration.png',
             'Bachelor of Science in Information Technology': 'Bachelor of Science in Information Technology.png'
@@ -7817,7 +8568,7 @@ class ScanCheckApp {
             const meta = document.createElement('span');
             meta.className = index === this.activeImportedStudentIndex ? 'small text-white-50' : 'small text-muted';
             const roomSeat = student.roomNo && student.seatNo ? `Room ${student.roomNo}, Seat ${student.seatNo}` : 'Room pending';
-            meta.textContent = `ID ${student.sheetId} • ${roomSeat}${student.course ? ` • ${student.course}` : ''}`;
+            meta.textContent = `Sheet ${student.sheetId} • ${roomSeat}${student.course ? ` • ${student.course}` : ''}`;
             info.appendChild(name);
             info.appendChild(meta);
             const row = document.createElement('span');
@@ -7909,12 +8660,10 @@ class ScanCheckApp {
         if (idInput) idInput.value = sheetId;
         if (activeImportedStudent && activeImportedStudent.sheetId !== sheetId) {
             activeImportedStudent.sheetId = sheetId;
-            activeImportedStudent.studentId = sheetId;
         }
 
         const studentData = {
             studentName: studentName,
-            studentId: sheetId,
             examId: examId,
             sheetId: sheetId,
             age: document.getElementById('qrStudentAge').value,
@@ -7959,7 +8708,6 @@ class ScanCheckApp {
             return false;
         }
     }
-
 
     clearBarcodePreview() {
         this.clearImportedStudentBatch();
@@ -8131,7 +8879,7 @@ async function downloadAnswerSheetImage() {
         if (window.html2canvas) return window.html2canvas;
         await new Promise((resolve, reject) => {
             const script = document.createElement('script');
-            script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
+            script.src = '/vendor/html2canvas/html2canvas.min.js';
             script.async = true;
             script.onload = resolve;
             script.onerror = () => reject(new Error('Failed to load html2canvas'));
@@ -8281,6 +9029,7 @@ function printAnswerSheet() {
     let paperWidth = '8.5in';
     let paperHeight = '13in';
     let paperLabel = 'long bond paper (8.5in x 13in)';
+    let printGeometryConfig = null;
 
     if (importedStudents.length > 0) {
         const selectedQuiz = app.getSelectedExamForSheet();
@@ -8288,6 +9037,7 @@ function printAnswerSheet() {
             app.showToast('Select an exam before printing imported sheets.', 'warning');
             return;
         }
+        printGeometryConfig = selectedQuiz;
         pageMarkup = importedStudents
             .map((student) => app.renderStudentAnswerSheetMarkup(student, selectedQuiz))
             .filter(Boolean);
@@ -8324,6 +9074,7 @@ function printAnswerSheet() {
         title = [studentData.studentName, studentData.sheetId || studentData.studentId, 'Answer Sheet']
             .filter(Boolean)
             .join(' - ') || 'Answer Sheet';
+        printGeometryConfig = quiz;
         pageMarkup = [sheet.outerHTML];
     }
 
@@ -8384,31 +9135,9 @@ function printAnswerSheet() {
                     }
                     .sheet-page:last-child { page-break-after: auto; break-after: auto; }
                     .answer-sheet {
-                        width: ${paperWidth} !important;
-                        min-width: ${paperWidth} !important;
-                        max-width: ${paperWidth} !important;
-                        height: ${paperHeight} !important;
-                        min-height: ${paperHeight} !important;
-                        max-height: ${paperHeight} !important;
                         margin: 0 auto !important;
                         overflow: hidden !important;
                         transform: none !important;
-                    }
-                    .answer-sheet-q-grid {
-                        height: 100% !important;
-                        min-height: 0 !important;
-                        align-items: stretch !important;
-                    }
-                    .answer-sheet-q-col {
-                        display: flex !important;
-                        flex-direction: column !important;
-                        justify-content: stretch !important;
-                        height: 100% !important;
-                        min-height: 0 !important;
-                    }
-                    .question-row {
-                        flex: 1 1 0 !important;
-                        min-height: 0 !important;
                     }
                     @media print {
                         body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -8425,7 +9154,22 @@ function printAnswerSheet() {
                     Do not fit, shrink, or print multiple answer sheets on one page.
                 </div>
                 ${pageMarkup.map((markup) => `<div class="sheet-page">${markup}</div>`).join('')}
-                <script>
+                    <script>
+                    const printGeometryConfig = ${JSON.stringify(printGeometryConfig || {}).replace(/</g, '\\u003c')};
+                    const validatePrintGeometry = () => {
+                        try {
+                            const savedLayout = window.opener?.latestOmrGeneratedLayout || null;
+                            const generator = savedLayout?.format === 'normal'
+                                ? window.opener?.normalAnswerSheetGenerator
+                                : window.opener?.answerSheetGenerator;
+                            const firstSheet = document.querySelector('.answer-sheet');
+                            if (generator?.validateLayoutAgainstDom && firstSheet && savedLayout) {
+                                generator.validateLayoutAgainstDom(firstSheet, printGeometryConfig, savedLayout, 'print-window');
+                            }
+                        } catch (error) {
+                            console.warn('Print geometry validation failed:', error);
+                        }
+                    };
                     const waitForImages = () => Promise.all(
                         Array.from(document.images).map((img) => {
                             if (img.complete) return Promise.resolve();
@@ -8437,9 +9181,12 @@ function printAnswerSheet() {
                     );
                     window.onload = async () => {
                         await waitForImages();
-                        setTimeout(() => {
-                            window.print();
-                        }, 700);
+                        requestAnimationFrame(() => {
+                            requestAnimationFrame(() => {
+                                validatePrintGeometry();
+                                window.print();
+                            });
+                        });
                     };
                 </script>
             </body>

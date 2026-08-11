@@ -122,10 +122,12 @@ class AnswerSheetGenerator {
                 dateTime: String(config.studentData.dateTime || '').trim()
             };
             const qrValue = encodeURIComponent(JSON.stringify(qrPayload));
+            const qrEndpoint = `/api/qr?size=900&margin=8&ecc=H&data=${qrValue}`;
+            const qrSrc = window.scanCheckConfig ? window.scanCheckConfig.resolveUrl(qrEndpoint) : qrEndpoint;
             qrImg = `
                 <img 
                     alt="Student QR" 
-                    src="https://api.qrserver.com/v1/create-qr-code/?size=900x900&margin=8&ecc=H&data=${qrValue}" 
+                    src="${qrSrc}" 
                     style="
                         width: 100%;
                         height: 100%;
@@ -139,20 +141,22 @@ class AnswerSheetGenerator {
         return `
             <div style="
                 display: grid;
-                grid-template-columns: 0.65in 1fr 1.05in;
+                grid-template-columns: 0.9in 1fr 2.7in;
                 align-items: center;
-                gap: 0.06in;
-                padding: 0.04in 0.02in;
-                min-height: 0.95in;
+                gap: 0.1in;
+                padding: 0.08in;
+                min-height: 2.3in;
                 background: #fff;
+                border: 3px double ${color};
+                border-radius: 8px;
                 box-sizing: border-box;
             ">
                 <!-- Left Section: Logo -->
-                <div style="display: flex; align-items: center; justify-content: center;">
+                <div style="display: flex; align-items: center; justify-content: center; width: 0.9in;">
                     <img src="images/pcc.png" 
                          style="
-                            width: 0.55in;
-                            height: 0.55in;
+                            width: 0.7in;
+                            height: 0.7in;
                             object-fit: contain;
                             display: block;
                             filter: contrast(1.1);
@@ -164,43 +168,43 @@ class AnswerSheetGenerator {
                 <div style="text-align: center; min-width: 0;">
                     <h1 style="
                         margin: 0;
-                        font-size: 0.155in;
-                        letter-spacing: 1px;
+                        font-size: 0.18in;
+                        letter-spacing: 1.2px;
                         text-transform: uppercase;
                         font-weight: 900;
                         color: ${color};
-                        line-height: 1.15;
+                        line-height: 1.2;
                         word-break: keep-all;
                     ">PASSI CITY COLLEGE</h1>
-                    <div style="font-size: 0.08in; font-weight: 600; color: #444;">City of Passi, Iloilo</div>
+                    <div style="font-size: 0.095in; margin-bottom: 3px; font-weight: 600; color: #444;">City of Passi, Iloilo</div>
                     
                     <div style="
-                        border-top: 1.2px solid ${color};
-                        margin: 0.025in auto;
-                        width: 80%;
+                        border-top: 1.5px solid ${color};
+                        margin: 0.035in auto;
+                        width: 85%;
                     "></div>
                     
                     <h2 style="
-                        margin: 2px auto;
-                        font-size: 0.105in;
+                        margin: 3px auto;
+                        font-size: 0.12in;
                         font-weight: 800;
                         color: #000;
                         text-transform: uppercase;
-                        line-height: 1.2;
+                        line-height: 1.25;
                         word-break: keep-all;
                     ">${title}</h2>
                     
                     <div style="
-                        margin-top: 0.03in;
-                        padding: 0.015in 0.06in;
-                        border: 1.2px solid ${color};
-                        background-color: #f8f9fa;
-                        border-radius: 3px;
+                        margin-top: 0.05in;
+                        padding: 0.03in 0.08in;
+                        border: 1.5px solid ${color};
+                        background-color: #f8fafc;
+                        border-radius: 4px;
                         display: inline-block;
                     ">
                         <div data-export-warning="1" style="
                             display: block;
-                            font-size: 0.065in;
+                            font-size: 0.075in;
                             line-height: 1.2;
                             color: #d32f2f;
                             font-weight: 900;
@@ -214,41 +218,63 @@ class AnswerSheetGenerator {
                     </div>
                 </div>
                 
-                <!-- Right Section: QR + Layout ID -->
+                <!-- Right Section: Logo + QR + Layout ID -->
                 <div style="
                     display: flex;
-                    flex-direction: column;
+                    flex-direction: row;
                     align-items: center;
-                    justify-content: center;
-                    gap: 0.015in;
-                    flex: 0 0 auto;
+                    justify-content: flex-end;
+                    gap: 0.12in;
+                    width: 2.7in;
+                    min-width: 2.7in;
+                    flex-shrink: 0;
+                    white-space: nowrap;
                 ">
-                    <div data-layout-region="qr" style="
-                        width: 0.95in;
-                        height: 0.95in;
-                        padding: 0.075in;
-                        background: #fff;
-                        border: 1.6px solid ${color};
-                        box-sizing: border-box;
+                    <img src="${rightLogoSrc}" 
+                        style="
+                            width: 0.7in;
+                            height: 0.7in;
+                            object-fit: contain;
+                            display: block;
+                            flex: 0 0 auto;
+                            ${rightLogoStyle}
+                        " 
+                        alt="Right Logo">
+                    <div style="
                         display: flex;
+                        flex-direction: column;
                         align-items: center;
                         justify-content: center;
+                        gap: 0.02in;
+                        flex: 0 0 auto;
                     ">
-                        ${qrImg}
-                    </div>
-                    ${examId ? `
-                        <div style="
-                            font-size: 0.06in;
-                            font-weight: bold;
-                            color: #111;
-                            font-family: monospace;
-                            text-align: center;
-                            line-height: 1;
-                            white-space: nowrap;
+                        <div data-layout-region="qr" style="
+                            width: 1.66in;
+                            height: 1.66in;
+                            padding: 0.08in;
+                            background: #fff;
+                            border: 1.8px solid ${color};
+                            box-sizing: border-box;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
                         ">
-                            Layout ID: ${examId}
+                            ${qrImg}
                         </div>
-                    ` : ''}
+                        ${examId ? `
+                            <div style="
+                                font-size: 0.065in;
+                                font-weight: bold;
+                                color: #111;
+                                font-family: monospace;
+                                text-align: center;
+                                line-height: 1;
+                                white-space: nowrap;
+                            ">
+                                Layout ID: ${examId}
+                            </div>
+                        ` : ''}
+                    </div>
                 </div>
             </div>
         `;
@@ -351,9 +377,9 @@ class AnswerSheetGenerator {
                             <div style="display: flex; align-items: flex-end; gap: 0.03in; flex: 0 0 0.72in;">
                                 <strong style="width: 0.24in; ${labelStyle}">Sex:</strong>
                                 <span style="display: inline-flex; align-items: center; gap: 0.02in;">
-                                    <span style="width: 0.14in; height: 0.14in; border: 1.6px solid ${color}; border-radius: 50%; display: inline-block; box-sizing: border-box;"></span>
+                                    <span data-layout-group="sex" data-layout-label="M" style="width: 0.14in; height: 0.14in; border: 1.6px solid ${color}; border-radius: 50%; display: inline-block; box-sizing: border-box;"></span>
                                     <span style="font-size: 0.07in; font-weight: 900; margin-right: 0.03in;">M</span>
-                                    <span style="width: 0.14in; height: 0.14in; border: 1.6px solid ${color}; border-radius: 50%; display: inline-block; box-sizing: border-box;"></span>
+                                    <span data-layout-group="sex" data-layout-label="F" style="width: 0.14in; height: 0.14in; border: 1.6px solid ${color}; border-radius: 50%; display: inline-block; box-sizing: border-box;"></span>
                                     <span style="font-size: 0.07in; font-weight: 900;">F</span>
                                 </span>
                             </div>
@@ -545,6 +571,7 @@ class MultiSubjectAnswerSheetGenerator extends AnswerSheetGenerator {
             });
         };
 
+        Object.entries(layout.sexGroup || {}).forEach(([label, bubble]) => pushBubble('sex', label, bubble));
         Object.entries(layout.entryGroup || {}).forEach(([label, bubble]) => pushBubble('entry', label, bubble));
         Object.entries(layout.equityGroup || {}).forEach(([label, bubble]) => pushBubble('equity', label, bubble));
         Object.entries(layout.registrationAnchors || {}).forEach(([label, anchor]) => pushBubble('anchor', label, anchor));
@@ -556,6 +583,96 @@ class MultiSubjectAnswerSheetGenerator extends AnswerSheetGenerator {
             });
         });
         return rows;
+    }
+
+    collectComparableGeometry(layout = {}) {
+        const rows = [];
+        const pushPoint = (scope, label, rect) => {
+            if (!rect || typeof rect !== 'object') return;
+            rows.push({
+                scope,
+                label,
+                x: Number(rect.x),
+                y: Number(rect.y),
+                width: Number(rect.width || 0),
+                height: Number(rect.height || 0)
+            });
+        };
+        Object.entries(layout.registrationAnchors || {}).forEach(([label, anchor]) => pushPoint('anchor', label, anchor));
+        (layout.timingMarks || []).forEach((mark, index) => {
+            pushPoint('timing', `${mark.row}:${mark.side || 'left'}:${index}`, mark.rect);
+        });
+        (layout.subjects || []).forEach((subject) => {
+            pushPoint('subject', subject.code || subject.name || '', subject.block);
+            (subject.questions || []).forEach((question) => {
+                pushPoint(`${subject.code}:Q${question.number}`, 'row', question.row);
+                Object.entries(question.choices || {}).forEach(([label, bubble]) => {
+                    pushPoint(`${subject.code}:Q${question.number}`, label, bubble);
+                });
+            });
+        });
+        return rows;
+    }
+
+    summarizeDistances(values = []) {
+        const sorted = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+        if (!sorted.length) return { count: 0, mean: 0, median: 0, rms: 0, p95: 0, max: 0 };
+        const sum = sorted.reduce((acc, value) => acc + value, 0);
+        const sumSquares = sorted.reduce((acc, value) => acc + value * value, 0);
+        const at = (p) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * p) - 1))];
+        return {
+            count: sorted.length,
+            mean: sum / sorted.length,
+            median: sorted[Math.floor(sorted.length / 2)],
+            rms: Math.sqrt(sumSquares / sorted.length),
+            p95: at(0.95),
+            max: sorted[sorted.length - 1]
+        };
+    }
+
+    compareLayoutGeometry(savedLayout, currentLayout) {
+        const savedRows = this.collectComparableGeometry(savedLayout);
+        const currentRows = this.collectComparableGeometry(currentLayout);
+        const currentByKey = new Map(currentRows.map((row) => [`${row.scope}|${row.label}`, row]));
+        const distances = [];
+        const dxValues = [];
+        const dyValues = [];
+        let missing = 0;
+        savedRows.forEach((saved) => {
+            const current = currentByKey.get(`${saved.scope}|${saved.label}`);
+            if (!current) {
+                missing += 1;
+                return;
+            }
+            const dx = current.x - saved.x;
+            const dy = current.y - saved.y;
+            dxValues.push(Math.abs(dx));
+            dyValues.push(Math.abs(dy));
+            distances.push(Math.hypot(dx, dy));
+        });
+        return {
+            compared: distances.length,
+            missing,
+            distance: this.summarizeDistances(distances),
+            dxAbs: this.summarizeDistances(dxValues),
+            dyAbs: this.summarizeDistances(dyValues)
+        };
+    }
+
+    validateLayoutAgainstDom(sheetContainer, config = {}, savedLayout = null, context = 'print') {
+        const expected = savedLayout || window.latestOmrGeneratedLayout || null;
+        if (!expected) return null;
+        const current = this.extractGeneratedLayout(sheetContainer, config);
+        if (!current) return null;
+        const report = this.compareLayoutGeometry(expected, current);
+        const maxDistance = Number(report.distance?.max || 0);
+        const p95Distance = Number(report.distance?.p95 || 0);
+        if (maxDistance > 1 || p95Distance > 0.75 || report.missing > 0) {
+            console.warn(`[AnswerSheet] ${context} geometry differs from saved layout`, report);
+        } else {
+            console.debug(`[AnswerSheet] ${context} geometry matches saved layout`, report);
+        }
+        return report;
     }
 
     layoutsMatchGeometry(a, b, tolerance = 2) {
@@ -579,10 +696,49 @@ class MultiSubjectAnswerSheetGenerator extends AnswerSheetGenerator {
         return true;
     }
 
-    relativeRect(element, sheetRect) {
+    cssLengthToPx(value) {
+        const raw = String(value || '').trim().toLowerCase();
+        const match = raw.match(/^(-?\d+(?:\.\d+)?)(px|in|mm|cm)?$/);
+        if (!match) return null;
+        const amount = Number.parseFloat(match[1]);
+        const unit = match[2] || 'px';
+        if (!Number.isFinite(amount)) return null;
+        if (unit === 'px') return amount;
+        if (unit === 'in') return amount * 96;
+        if (unit === 'mm') return amount * 96 / 25.4;
+        if (unit === 'cm') return amount * 96 / 2.54;
+        return null;
+    }
+
+    getCanonicalSheetSize(config = {}, sheetRect = null) {
+        const paperSize = this.getPaperSize(config);
+        const width = this.cssLengthToPx(paperSize.width);
+        const height = this.cssLengthToPx(paperSize.height);
+        return {
+            width: width || Number(sheetRect?.width || 0),
+            height: height || Number(sheetRect?.height || 0)
+        };
+    }
+
+    normalizeRect(rect, sheetRect, canonicalSize) {
+        const scaleX = canonicalSize?.width && sheetRect?.width ? canonicalSize.width / sheetRect.width : 1;
+        const scaleY = canonicalSize?.height && sheetRect?.height ? canonicalSize.height / sheetRect.height : 1;
+        return {
+            x: rect.x * scaleX,
+            y: rect.y * scaleY,
+            left: rect.left * scaleX,
+            top: rect.top * scaleY,
+            width: rect.width * scaleX,
+            height: rect.height * scaleY,
+            right: rect.right * scaleX,
+            bottom: rect.bottom * scaleY
+        };
+    }
+
+    relativeRect(element, sheetRect, canonicalSize = null) {
         if (!element) return null;
         const elementRect = element.getBoundingClientRect();
-        return {
+        const rect = {
             x: elementRect.left - sheetRect.left + elementRect.width / 2,
             y: elementRect.top - sheetRect.top + elementRect.height / 2,
             left: elementRect.left - sheetRect.left,
@@ -592,10 +748,11 @@ class MultiSubjectAnswerSheetGenerator extends AnswerSheetGenerator {
             right: elementRect.right - sheetRect.left,
             bottom: elementRect.bottom - sheetRect.top
         };
+        return canonicalSize ? this.normalizeRect(rect, sheetRect, canonicalSize) : rect;
     }
 
-    bubbleFromElement(element, sheetRect) {
-        const rect = this.relativeRect(element, sheetRect);
+    bubbleFromElement(element, sheetRect, canonicalSize = null) {
+        const rect = this.relativeRect(element, sheetRect, canonicalSize);
         if (!rect) return null;
         return {
             x: rect.x,
@@ -611,18 +768,19 @@ class MultiSubjectAnswerSheetGenerator extends AnswerSheetGenerator {
         const sheetRect = sheet.getBoundingClientRect();
         if (!sheetRect.width || !sheetRect.height) return null;
         const paperSize = this.getPaperSize(config);
+        const canonicalSize = this.getCanonicalSheetSize(config, sheetRect);
 
         const studentData = config.studentData || {};
         const examId = String(studentData.examId || config.examId || config.exam_id || config.id || config.quizId || '').trim();
         if (!examId) return null;
         const normalizedSubjects = this.normalizeSubjects(config.subjects || config.subjectConfig);
 
-        const region = (name) => this.relativeRect(sheet.querySelector(`[data-layout-region="${name}"]`), sheetRect);
+        const region = (name) => this.relativeRect(sheet.querySelector(`[data-layout-region="${name}"]`), sheetRect, canonicalSize);
         const anchors = () => {
             const out = {};
             sheet.querySelectorAll('[data-layout-anchor]').forEach((element) => {
                 const label = element.getAttribute('data-layout-anchor') || '';
-                const anchor = this.bubbleFromElement(element, sheetRect);
+                const anchor = this.bubbleFromElement(element, sheetRect, canonicalSize);
                 if (label && anchor) out[label] = anchor;
             });
             return out;
@@ -631,7 +789,7 @@ class MultiSubjectAnswerSheetGenerator extends AnswerSheetGenerator {
             const out = {};
             sheet.querySelectorAll(`[data-layout-group="${name}"]`).forEach((element) => {
                 const label = element.getAttribute('data-layout-label') || '';
-                const bubble = this.bubbleFromElement(element, sheetRect);
+                const bubble = this.bubbleFromElement(element, sheetRect, canonicalSize);
                 if (label && bubble) out[label] = bubble;
             });
             return out;
@@ -641,7 +799,7 @@ class MultiSubjectAnswerSheetGenerator extends AnswerSheetGenerator {
             sheet.querySelectorAll('[data-layout-timing-row]').forEach((element) => {
                 const row = Number.parseInt(element.getAttribute('data-layout-timing-row') || '0', 10);
                 const side = element.getAttribute('data-layout-timing-side') || 'left';
-                const rect = this.relativeRect(element, sheetRect);
+                const rect = this.relativeRect(element, sheetRect, canonicalSize);
                 if (row > 0 && rect) out.push({ row, side, rect });
             });
             return out.sort((a, b) => a.row - b.row);
@@ -650,7 +808,7 @@ class MultiSubjectAnswerSheetGenerator extends AnswerSheetGenerator {
             const out = {};
             sheet.querySelectorAll('[data-layout-density-ref]').forEach((element) => {
                 const label = element.getAttribute('data-layout-density-ref') || '';
-                const rect = this.relativeRect(element, sheetRect);
+                const rect = this.relativeRect(element, sheetRect, canonicalSize);
                 if (label && rect) out[label] = rect;
             });
             return out;
@@ -666,13 +824,13 @@ class MultiSubjectAnswerSheetGenerator extends AnswerSheetGenerator {
                 const choices = {};
                 row.querySelectorAll('[data-layout-choice]').forEach((choice) => {
                     const label = choice.getAttribute('data-layout-choice') || '';
-                    const bubble = this.bubbleFromElement(choice, sheetRect);
+                    const bubble = this.bubbleFromElement(choice, sheetRect, canonicalSize);
                     if (label && bubble) choices[label] = bubble;
                 });
                 if (number > 0 && Object.keys(choices).length > 0) {
                     questions.push({
                         number,
-                        row: this.relativeRect(row, sheetRect),
+                        row: this.relativeRect(row, sheetRect, canonicalSize),
                         choices
                     });
                 }
@@ -680,7 +838,7 @@ class MultiSubjectAnswerSheetGenerator extends AnswerSheetGenerator {
             subjects.push({
                 code,
                 name,
-                block: this.relativeRect(subjectElement, sheetRect),
+                block: this.relativeRect(subjectElement, sheetRect, canonicalSize),
                 questions
             });
         });
@@ -689,7 +847,7 @@ class MultiSubjectAnswerSheetGenerator extends AnswerSheetGenerator {
         const densityRefMap = densityRefs();
 
         const layout = {
-            layoutVersion: 'generated-layout-v1',
+            layoutVersion: 'generated-layout-v2-print-canonical',
             examId,
             exam_id: examId,
             sheetId: String(studentData.sheetId || studentData.studentId || '').trim(),
@@ -697,18 +855,21 @@ class MultiSubjectAnswerSheetGenerator extends AnswerSheetGenerator {
             title: config.title || '',
             generatedAt: new Date().toISOString(),
             sheetSize: {
-                width: sheetRect.width,
-                height: sheetRect.height
+                width: canonicalSize.width,
+                height: canonicalSize.height
             },
             scaleReference: {
                 paper: config.paperSize || 'a4',
                 cssWidth: paperSize.width,
                 cssHeight: paperSize.height,
-                sheetWidth: sheetRect.width,
-                sheetHeight: sheetRect.height,
+                sheetWidth: canonicalSize.width,
+                sheetHeight: canonicalSize.height,
+                measuredSheetWidth: sheetRect.width,
+                measuredSheetHeight: sheetRect.height,
                 devicePixelRatio: window.devicePixelRatio || 1,
                 exportScale: 2,
-                coordinateOrigin: 'answer-sheet-container'
+                coordinateOrigin: 'answer-sheet-container',
+                coordinateSystem: 'canonical-print-css-px'
             },
             qrArea: region('qr'),
             studentNameArea: region('studentName'),
@@ -717,6 +878,8 @@ class MultiSubjectAnswerSheetGenerator extends AnswerSheetGenerator {
             ageArea: region('age'),
             roomNumberArea: region('roomNumber'),
             seatNumberArea: region('seatNumber'),
+            sexGroup: group('sex'),
+            sex_group: group('sex'),
             entryGroup: group('entry'),
             entry_group: group('entry'),
             equityGroup: group('equity'),

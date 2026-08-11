@@ -145,6 +145,8 @@ class NormalAnswerSheetGenerator {
                 dateTime: String(config.studentData.dateTime || '').trim()
             };
             const qrValue = encodeURIComponent(JSON.stringify(qrPayload));
+            const qrEndpoint = `/api/qr?size=900&margin=6&ecc=H&data=${qrValue}`;
+            const qrSrc = window.scanCheckConfig ? window.scanCheckConfig.resolveUrl(qrEndpoint) : qrEndpoint;
             qrWrapper = `
                 <div style="
                     display: flex;
@@ -161,10 +163,10 @@ class NormalAnswerSheetGenerator {
                         background: #fff;
                         border: 1.8px solid ${config.deptColor};
                         box-sizing: border-box;
-                    ">
+                        ">
                         <img 
                             alt="Student QR" 
-                            src="https://api.qrserver.com/v1/create-qr-code/?size=900x900&margin=6&ecc=H&data=${qrValue}" 
+                            src="${qrSrc}" 
                             style="
                                 width: 100%;
                                 height: 100%;
@@ -571,26 +573,162 @@ class NormalAnswerSheetGenerator {
 
     collectBubbleGeometry(layout) {
         const rows = [];
+        const pushBubble = (scope, label, bubble) => {
+            if (!bubble || typeof bubble !== 'object') return;
+            rows.push({
+                scope,
+                label,
+                x: bubble.x,
+                y: bubble.y,
+                radius: bubble.radius
+            });
+        };
+        Object.entries(layout.sexGroup || {}).forEach(([label, bubble]) => pushBubble('sex', label, bubble));
+        Object.entries(layout.entryGroup || {}).forEach(([label, bubble]) => pushBubble('entry', label, bubble));
+        Object.entries(layout.equityGroup || {}).forEach(([label, bubble]) => pushBubble('equity', label, bubble));
         (layout.subjects || []).forEach((subject) => {
             (subject.questions || []).forEach((question) => {
                 Object.entries(question.choices || {}).forEach(([label, bubble]) => {
-                    rows.push({
-                        scope: `${subject.code}:Q${question.number}`,
-                        label,
-                        x: bubble.x,
-                        y: bubble.y,
-                        radius: bubble.radius
-                    });
+                    pushBubble(`${subject.code}:Q${question.number}`, label, bubble);
                 });
             });
         });
         return rows;
     }
 
-    relativeRect(element, sheetRect) {
+    collectComparableGeometry(layout = {}) {
+        const rows = [];
+        const pushPoint = (scope, label, rect) => {
+            if (!rect || typeof rect !== 'object') return;
+            rows.push({
+                scope,
+                label,
+                x: Number(rect.x),
+                y: Number(rect.y),
+                width: Number(rect.width || 0),
+                height: Number(rect.height || 0)
+            });
+        };
+        Object.entries(layout.registrationAnchors || {}).forEach(([label, anchor]) => pushPoint('anchor', label, anchor));
+        (layout.timingMarks || []).forEach((mark, index) => {
+            pushPoint('timing', `${mark.row}:${mark.side || 'left'}:${index}`, mark.rect);
+        });
+        (layout.subjects || []).forEach((subject) => {
+            pushPoint('subject', subject.code || subject.name || '', subject.block);
+            (subject.questions || []).forEach((question) => {
+                pushPoint(`${subject.code}:Q${question.number}`, 'row', question.row);
+                Object.entries(question.choices || {}).forEach(([label, bubble]) => {
+                    pushPoint(`${subject.code}:Q${question.number}`, label, bubble);
+                });
+            });
+        });
+        return rows;
+    }
+
+    summarizeDistances(values = []) {
+        const sorted = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+        if (!sorted.length) return { count: 0, mean: 0, median: 0, rms: 0, p95: 0, max: 0 };
+        const sum = sorted.reduce((acc, value) => acc + value, 0);
+        const sumSquares = sorted.reduce((acc, value) => acc + value * value, 0);
+        const at = (p) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * p) - 1))];
+        return {
+            count: sorted.length,
+            mean: sum / sorted.length,
+            median: sorted[Math.floor(sorted.length / 2)],
+            rms: Math.sqrt(sumSquares / sorted.length),
+            p95: at(0.95),
+            max: sorted[sorted.length - 1]
+        };
+    }
+
+    compareLayoutGeometry(savedLayout, currentLayout) {
+        const savedRows = this.collectComparableGeometry(savedLayout);
+        const currentRows = this.collectComparableGeometry(currentLayout);
+        const currentByKey = new Map(currentRows.map((row) => [`${row.scope}|${row.label}`, row]));
+        const distances = [];
+        const dxValues = [];
+        const dyValues = [];
+        let missing = 0;
+        savedRows.forEach((saved) => {
+            const current = currentByKey.get(`${saved.scope}|${saved.label}`);
+            if (!current) {
+                missing += 1;
+                return;
+            }
+            const dx = current.x - saved.x;
+            const dy = current.y - saved.y;
+            dxValues.push(Math.abs(dx));
+            dyValues.push(Math.abs(dy));
+            distances.push(Math.hypot(dx, dy));
+        });
+        return {
+            compared: distances.length,
+            missing,
+            distance: this.summarizeDistances(distances),
+            dxAbs: this.summarizeDistances(dxValues),
+            dyAbs: this.summarizeDistances(dyValues)
+        };
+    }
+
+    validateLayoutAgainstDom(sheetContainer, config = {}, savedLayout = null, context = 'print') {
+        const expected = savedLayout || window.latestOmrGeneratedLayout || null;
+        if (!expected) return null;
+        const current = this.extractGeneratedLayout(sheetContainer, config);
+        if (!current) return null;
+        const report = this.compareLayoutGeometry(expected, current);
+        const maxDistance = Number(report.distance?.max || 0);
+        const p95Distance = Number(report.distance?.p95 || 0);
+        if (maxDistance > 1 || p95Distance > 0.75 || report.missing > 0) {
+            console.warn(`[NormalAnswerSheet] ${context} geometry differs from saved layout`, report);
+        } else {
+            console.debug(`[NormalAnswerSheet] ${context} geometry matches saved layout`, report);
+        }
+        return report;
+    }
+
+    cssLengthToPx(value) {
+        const raw = String(value || '').trim().toLowerCase();
+        const match = raw.match(/^(-?\d+(?:\.\d+)?)(px|in|mm|cm)?$/);
+        if (!match) return null;
+        const amount = Number.parseFloat(match[1]);
+        const unit = match[2] || 'px';
+        if (!Number.isFinite(amount)) return null;
+        if (unit === 'px') return amount;
+        if (unit === 'in') return amount * 96;
+        if (unit === 'mm') return amount * 96 / 25.4;
+        if (unit === 'cm') return amount * 96 / 2.54;
+        return null;
+    }
+
+    getCanonicalSheetSize(config = {}, sheetRect = null) {
+        const paperSize = this.getPaperSize(config);
+        const width = this.cssLengthToPx(paperSize.width);
+        const height = this.cssLengthToPx(paperSize.height);
+        return {
+            width: width || Number(sheetRect?.width || 0),
+            height: height || Number(sheetRect?.height || 0)
+        };
+    }
+
+    normalizeRect(rect, sheetRect, canonicalSize) {
+        const scaleX = canonicalSize?.width && sheetRect?.width ? canonicalSize.width / sheetRect.width : 1;
+        const scaleY = canonicalSize?.height && sheetRect?.height ? canonicalSize.height / sheetRect.height : 1;
+        return {
+            x: rect.x * scaleX,
+            y: rect.y * scaleY,
+            left: rect.left * scaleX,
+            top: rect.top * scaleY,
+            width: rect.width * scaleX,
+            height: rect.height * scaleY,
+            right: rect.right * scaleX,
+            bottom: rect.bottom * scaleY
+        };
+    }
+
+    relativeRect(element, sheetRect, canonicalSize = null) {
         if (!element) return null;
         const elementRect = element.getBoundingClientRect();
-        return {
+        const rect = {
             x: elementRect.left - sheetRect.left + elementRect.width / 2,
             y: elementRect.top - sheetRect.top + elementRect.height / 2,
             left: elementRect.left - sheetRect.left,
@@ -600,10 +738,11 @@ class NormalAnswerSheetGenerator {
             right: elementRect.right - sheetRect.left,
             bottom: elementRect.bottom - sheetRect.top
         };
+        return canonicalSize ? this.normalizeRect(rect, sheetRect, canonicalSize) : rect;
     }
 
-    bubbleFromElement(element, sheetRect) {
-        const rect = this.relativeRect(element, sheetRect);
+    bubbleFromElement(element, sheetRect, canonicalSize = null) {
+        const rect = this.relativeRect(element, sheetRect, canonicalSize);
         if (!rect) return null;
         return {
             x: rect.x,
@@ -644,18 +783,19 @@ class NormalAnswerSheetGenerator {
         const sheetRect = sheet.getBoundingClientRect();
         if (!sheetRect.width || !sheetRect.height) return null;
         const paperSize = this.getPaperSize(config);
+        const canonicalSize = this.getCanonicalSheetSize(config, sheetRect);
 
         const studentData = config.studentData || {};
         const examId = String(studentData.examId || config.examId || config.exam_id || config.id || config.quizId || '').trim();
         if (!examId) return null;
         const normalizedSubjects = this.normalizeSubjects(config.subjects || config.subjectConfig);
 
-        const region = (name) => this.relativeRect(sheet.querySelector(`[data-layout-region="${name}"]`), sheetRect);
+        const region = (name) => this.relativeRect(sheet.querySelector(`[data-layout-region="${name}"]`), sheetRect, canonicalSize);
         const anchors = () => {
             const out = {};
             sheet.querySelectorAll('[data-layout-anchor]').forEach((element) => {
                 const label = element.getAttribute('data-layout-anchor') || '';
-                const anchor = this.bubbleFromElement(element, sheetRect);
+                const anchor = this.bubbleFromElement(element, sheetRect, canonicalSize);
                 if (label && anchor) out[label] = anchor;
             });
             return out;
@@ -664,7 +804,7 @@ class NormalAnswerSheetGenerator {
             const out = {};
             sheet.querySelectorAll(`[data-layout-group="${name}"]`).forEach((element) => {
                 const label = element.getAttribute('data-layout-label') || '';
-                const bubble = this.bubbleFromElement(element, sheetRect);
+                const bubble = this.bubbleFromElement(element, sheetRect, canonicalSize);
                 if (label && bubble) out[label] = bubble;
             });
             return out;
@@ -674,7 +814,7 @@ class NormalAnswerSheetGenerator {
             sheet.querySelectorAll('[data-layout-timing-row]').forEach((element) => {
                 const row = Number.parseInt(element.getAttribute('data-layout-timing-row') || '0', 10);
                 const side = element.getAttribute('data-layout-timing-side') || 'left';
-                const rect = this.relativeRect(element, sheetRect);
+                const rect = this.relativeRect(element, sheetRect, canonicalSize);
                 if (row > 0 && rect) out.push({ row, side, rect });
             });
             return out.sort((a, b) => a.row - b.row);
@@ -683,7 +823,7 @@ class NormalAnswerSheetGenerator {
             const out = {};
             sheet.querySelectorAll('[data-layout-density-ref]').forEach((element) => {
                 const label = element.getAttribute('data-layout-density-ref') || '';
-                const rect = this.relativeRect(element, sheetRect);
+                const rect = this.relativeRect(element, sheetRect, canonicalSize);
                 if (label && rect) out[label] = rect;
             });
             return out;
@@ -699,13 +839,13 @@ class NormalAnswerSheetGenerator {
                 const choices = {};
                 row.querySelectorAll('[data-layout-choice]').forEach((choice) => {
                     const label = choice.getAttribute('data-layout-choice') || '';
-                    const bubble = this.bubbleFromElement(choice, sheetRect);
+                    const bubble = this.bubbleFromElement(choice, sheetRect, canonicalSize);
                     if (label && bubble) choices[label] = bubble;
                 });
                 if (number > 0 && Object.keys(choices).length > 0) {
                     questions.push({
                         number,
-                        row: this.relativeRect(row, sheetRect),
+                        row: this.relativeRect(row, sheetRect, canonicalSize),
                         choices
                     });
                 }
@@ -713,7 +853,7 @@ class NormalAnswerSheetGenerator {
             subjects.push({
                 code,
                 name,
-                block: this.relativeRect(subjectElement, sheetRect),
+                block: this.relativeRect(subjectElement, sheetRect, canonicalSize),
                 questions
             });
         });
@@ -722,7 +862,7 @@ class NormalAnswerSheetGenerator {
         const densityRefMap = densityRefs();
 
         const layout = {
-            layoutVersion: 'generated-layout-v1',
+            layoutVersion: 'generated-layout-v2-print-canonical',
             examId,
             exam_id: examId,
             sheetId: String(studentData.sheetId || studentData.studentId || '').trim(),
@@ -730,18 +870,21 @@ class NormalAnswerSheetGenerator {
             title: config.title || '',
             generatedAt: new Date().toISOString(),
             sheetSize: {
-                width: sheetRect.width,
-                height: sheetRect.height
+                width: canonicalSize.width,
+                height: canonicalSize.height
             },
             scaleReference: {
                 paper: config.paperSize || 'long-bond',
                 cssWidth: paperSize.width,
                 cssHeight: paperSize.height,
-                sheetWidth: sheetRect.width,
-                sheetHeight: sheetRect.height,
+                sheetWidth: canonicalSize.width,
+                sheetHeight: canonicalSize.height,
+                measuredSheetWidth: sheetRect.width,
+                measuredSheetHeight: sheetRect.height,
                 devicePixelRatio: window.devicePixelRatio || 1,
                 exportScale: 2,
-                coordinateOrigin: 'answer-sheet-container'
+                coordinateOrigin: 'answer-sheet-container',
+                coordinateSystem: 'canonical-print-css-px'
             },
             qrArea: region('qr'),
             studentNameArea: region('studentName'),
@@ -750,6 +893,8 @@ class NormalAnswerSheetGenerator {
             ageArea: region('age'),
             roomNumberArea: region('roomNumber'),
             seatNumberArea: region('seatNumber'),
+            sexGroup: group('sex'),
+            sex_group: group('sex'),
             entryGroup: group('entry'),
             entry_group: group('entry'),
             equityGroup: group('equity'),
