@@ -7,5 +7,5 @@ const secretPath = path.resolve(__dirname, '..', '..', '..', '.runtime', 'data',
 const secret = fs.readFileSync(secretPath, 'utf8').trim();
 
 const payload = { id: 1, username: 'admin' };
-const token = jwt.sign(payload, secret, { expiresIn: '1h' });
+const token = jwt.sign(payload, secret, { expiresIn: '8h' });
 console.log(token);

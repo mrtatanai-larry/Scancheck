@@ -136,7 +136,10 @@ class ScanCheckConfig {
         console.log(`[ScanCheck] API Call: ${options.method || 'GET'} ${url}`);
 
         try {
-            const token = localStorage.getItem('scancheck_token');
+            let token = localStorage.getItem('scancheck_token');
+            if (token && token !== 'undefined' && token !== 'null' && this.isTokenExpiringSoon(token)) {
+                token = await this.tryRefreshToken();
+            }
             const headers = {
                 'Content-Type': 'application/json',
                 ...options.headers
@@ -146,10 +149,22 @@ class ScanCheckConfig {
                 headers['Authorization'] = `Bearer ${token}`;
             }
 
-            const response = await fetch(url, {
+            let response = await fetch(url, {
                 ...options,
                 headers
             });
+
+            if ((response.status === 401 || response.status === 403) && !options.__retried) {
+                const refreshedToken = await this.tryRefreshToken();
+                if (refreshedToken) {
+                    headers['Authorization'] = `Bearer ${refreshedToken}`;
+                    response = await fetch(url, {
+                        method: options.method || 'GET',
+                        body: options.body,
+                        headers
+                    });
+                }
+            }
 
             if (!response.ok) {
                 let bodyText = '';
@@ -196,6 +211,45 @@ class ScanCheckConfig {
             }
 
             throw error;
+        }
+    }
+
+    getTokenExpiryMs(token) {
+        try {
+            const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+            return payload.exp ? payload.exp * 1000 : null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    isTokenExpiringSoon(token, windowMs = 5 * 60 * 1000) {
+        const exp = this.getTokenExpiryMs(token);
+        if (exp === null) return false;
+        return (exp - Date.now()) < windowMs;
+    }
+
+    async tryRefreshToken() {
+        const token = localStorage.getItem('scancheck_token');
+        if (!token || token === 'undefined' || token === 'null') return null;
+        try {
+            const response = await fetch(this.resolveUrl('/api/auth/refresh'), {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: '{}'
+            });
+            if (!response.ok) return null;
+            const data = await response.json();
+            if (data && data.token) {
+                localStorage.setItem('scancheck_token', data.token);
+                return data.token;
+            }
+            return null;
+        } catch (error) {
+            return null;
         }
     }
 }

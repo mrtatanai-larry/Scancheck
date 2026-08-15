@@ -323,7 +323,7 @@
                         <button id="generateSheetBtn" class="btn btn-primary" onclick="app.generateGenericSheet()">
                             <i class="fas fa-plus-circle me-1"></i> Generate Sheet
                         </button>
-                        <button class="btn btn-outline-primary" onclick="downloadAnswerSheetImage()">
+                        <button id="answerSheetDownloadBtn" class="btn btn-outline-primary" onclick="downloadAnswerSheetImage()" onmouseenter="preloadAnswerSheetImageExport()" onfocus="preloadAnswerSheetImageExport()">
                             <i class="fas fa-download me-1"></i> Download
                         </button>
                         <button class="btn btn-outline-secondary" onclick="openAnswerSheetPdf()">
@@ -387,8 +387,8 @@
                                     <span id="qrGeneratedExamIdDisplay" class="fw-bold">-</span>
                                 </div>
                                 <div class="d-flex justify-content-between">
-                                    <span class="text-muted">Room/Seat:</span>
-                                    <span id="qrGeneratedRoomSeatDisplay" class="fw-bold">-</span>
+                                    <span class="text-muted">Room:</span>
+                                    <span id="qrGeneratedRoomDisplay" class="fw-bold">-</span>
                                 </div>
                             </div>
 
@@ -826,13 +826,9 @@
                                         <label class="form-label small text-muted">Course</label>
                                         <input type="text" id="ocrStudentCourse" class="form-control" placeholder="Not detected" readonly>
                                     </div>
-                                    <div class="col-6">
+                                    <div class="col-12">
                                         <label class="form-label small text-muted">Room No.</label>
                                         <input type="text" id="ocrRoomNo" class="form-control" readonly>
-                                    </div>
-                                    <div class="col-6">
-                                        <label class="form-label small text-muted">Seat No.</label>
-                                        <input type="text" id="ocrSeatNo" class="form-control" readonly>
                                     </div>
                                     <div class="col-12">
                                         <label class="form-label small text-muted">Score</label>
@@ -1291,12 +1287,16 @@
 
                         <div class="ai-settings-section">
                             <div class="ai-section-title">API Connection</div>
-                            <div class="row g-3 align-items-end">
-                                <div class="col-lg-7">
+                            <div class="row g-3">
+                                <div class="col-12">
                                     <label class="form-label small fw-bold text-uppercase text-muted">Gemini API Key</label>
                                     <div id="aiOmrKeyPreview" class="ai-key-preview">Not configured</div>
                                     <div class="form-text" id="aiOmrKeyStatus">Key status not loaded.</div>
-                                    <div id="aiOmrKeyInputGroup" class="input-group mt-2 d-none">
+                                </div>
+                            </div>
+                            <div class="row g-3 align-items-center">
+                                <div class="col-lg-7">
+                                    <div id="aiOmrKeyInputGroup" class="input-group d-none">
                                         <input type="password" id="aiOmrApiKey" class="form-control" autocomplete="off" placeholder="Paste replacement Gemini API key">
                                         <button class="btn btn-outline-secondary" type="button" id="aiOmrToggleKeyBtn">
                                             <i class="fas fa-eye"></i>
@@ -1304,7 +1304,7 @@
                                         <button class="btn btn-outline-secondary" type="button" id="aiOmrCancelReplaceKeyBtn">Cancel</button>
                                     </div>
                                 </div>
-                                <div class="col-lg-5 d-flex flex-wrap gap-2 justify-content-lg-end">
+                                <div class="col-lg-5 d-flex flex-wrap gap-2 align-items-center justify-content-lg-end">
                                     <button class="btn btn-outline-primary" id="aiOmrTestConnectionBtn" type="button">
                                         <i class="fas fa-plug me-1"></i> Test Connection
                                     </button>
@@ -1642,7 +1642,20 @@
                         </div>
                         <div class="mb-4">
                             <label class="form-label fw-bold text-muted small text-uppercase d-block">Exam Structure</label>
-                            <div class="form-text mb-2"><i class="fas fa-info-circle me-1"></i> Multi-subject layouts are auto-saved.</div>
+                            <div id="examStructureHelp" class="form-text mb-2"><i class="fas fa-info-circle me-1"></i> Subject layouts are auto-saved.</div>
+                            <div id="singleSubjectFields" class="row g-2 mb-2 d-none">
+                                <div class="col-sm-4">
+                                    <label class="form-label small text-muted mb-1" for="singleSubjectCode">Subject Code</label>
+                                    <input type="text" class="form-control form-control-sm" id="singleSubjectCode" name="singleSubjectCode" placeholder="e.g. IT101" maxlength="24" oninput="app.renderCreateExamSubjectSummary('normal')">
+                                </div>
+                                <div class="col-sm-8">
+                                    <label class="form-label small text-muted mb-1" for="singleSubjectName">Subject Name</label>
+                                    <input type="text" class="form-control form-control-sm" id="singleSubjectName" name="singleSubjectName" placeholder="e.g. Programming" maxlength="80" oninput="app.renderCreateExamSubjectSummary('normal')">
+                                </div>
+                            </div>
+                            <div id="createExamSubjectSummary" class="border rounded bg-light p-2 mb-2 small">
+                                <div class="text-muted">No subjects loaded.</div>
+                            </div>
                             <button id="editSubjectsModalBtn" type="button" class="btn btn-outline-primary btn-sm w-100 mt-1" data-bs-toggle="modal" data-bs-target="#editSubjectsModal">
                                 <i class="fas fa-edit me-1"></i> Edit Subjects
                             </button>
@@ -1681,7 +1694,7 @@
                     <div id="subjectsListContainer" class="d-flex flex-column gap-2 mb-3">
                         <!-- Dynamic list of subjects -->
                     </div>
-                    <button class="btn btn-outline-primary btn-sm" onclick="app.addSubjectToEdit()">
+                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="app.addSubjectToEdit()">
                         <i class="fas fa-plus me-1"></i> Add Subject
                     </button>
                 </div>
@@ -1706,11 +1719,11 @@
     <script src="js/modal-manager.js?v=20260525a"></script>
 
     <!-- Application Scripts -->
-    <script src="js/config.js?v=20260811-ai-providers"></script>
+    <script src="js/config.js?v=20260813-live-refresh-fix"></script>
     <script src="js/subject-report.js?v=20260808a"></script>
-    <script src="js/app.js?v=20260811-top-fields"></script>
-    <script src="js/answer-sheet.js?v=20260528b"></script>
-    <script src="js/answer-sheetnormal.js?v=20260610a"></script>
+    <script src="js/app.js?v=20260813-answerkey-cleanup"></script>
+    <script src="js/answer-sheet.js?v=20260813-a4-spacing"></script>
+    <script src="js/answer-sheetnormal.js?v=20260813-a4-spacing"></script>
     <!-- Edit Record Modal -->
     <div class="modal fade" id="editRecordModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-xl modal-dialog-centered">
@@ -1722,14 +1735,12 @@
                 <div class="modal-body">
                     <form id="editRecordForm">
                         <input type="hidden" id="editRecordId">
-                        <div class="row g-3">
+                        <div class="row g-3 align-items-start">
+                            <div class="col-lg-7">
+                                <div class="row g-3">
                             <div class="col-md-6">
                                 <label class="form-label small fw-bold">Student Name</label>
                                 <input type="text" id="editStudentName" class="form-control" required>
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label small fw-bold">Sheet ID</label>
-                                <input type="text" id="editStudentId" class="form-control">
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label small fw-bold">Course</label>
@@ -1752,16 +1763,8 @@
                                 <input type="text" id="editRoomNo" class="form-control">
                             </div>
                             <div class="col-md-3">
-                                <label class="form-label small fw-bold">Seat No.</label>
-                                <input type="text" id="editSeatNo" class="form-control">
-                            </div>
-                            <div class="col-md-3">
                                 <label class="form-label small fw-bold">Score</label>
                                 <input type="number" id="editScore" class="form-control">
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label small fw-bold">Exam Date & Time</label>
-                                <input type="text" id="editExamDateTime" class="form-control">
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label small fw-bold">Entry Type</label>
@@ -1787,19 +1790,9 @@
                                     <option value="Magna Carta">Magna Carta</option>
                                 </select>
                             </div>
-                        </div>
-
-                        <!-- Manual Answer Editing Section -->
-                        <div class="row mt-4 border-top pt-3">
-                            <div class="col-lg-7 border-end">
-                                <h6 class="fw-bold text-dark mb-3"><i class="fas fa-tasks me-2"></i> Manual Answer Correction</h6>
-                                <div class="p-3 bg-light rounded-4 border">
-                                    <div id="editRecordAnswersGrid" class="row row-cols-5 g-2" style="max-height: 450px; overflow-y: auto;">
-                                        <!-- Answers will be populated here -->
-                                    </div>
                                 </div>
                             </div>
-                            <div class="col-lg-5 ps-lg-4">
+                            <div class="col-lg-5 border-start ps-lg-4 mt-3 mt-lg-0">
                                 <h6 class="fw-bold text-dark mb-3"><i class="fas fa-image me-2"></i> Scanned Document</h6>
                                 <div id="editRecordImagePanel" class="extraction-image-preview-container">
                                     <div class="ocr-image-toolbar">

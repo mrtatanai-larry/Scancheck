@@ -119,6 +119,7 @@ async function decodeQrFromImage(imageBuffer) {
 
 function layoutIdFromQrData(data = {}) {
     return data.examId
+        || data.e
         || data.exam_id
         || data.layoutId
         || data.layout_id

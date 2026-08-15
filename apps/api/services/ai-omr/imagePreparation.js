@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const Jimp = require('jimp');
@@ -82,20 +83,34 @@ async function imageToJpeg(image, options = {}) {
 }
 
 function getPythonCommand(runtimePaths = {}) {
-    if (process.env.SCANCHECK_PYTHON) return process.env.SCANCHECK_PYTHON;
+    if (process.env.SCANCHECK_PYTHON && isUsablePythonCommand(process.env.SCANCHECK_PYTHON)) {
+        return process.env.SCANCHECK_PYTHON;
+    }
+
     const repoRoot = runtimePaths.repoRoot || process.cwd();
     const localCandidates = [
         path.join(repoRoot, '.venv', 'bin', 'python'),
         path.join(repoRoot, '.venv', 'Scripts', 'python.exe')
     ];
     for (const candidate of localCandidates) {
-        try {
-            if (require('fs').existsSync(candidate)) return candidate;
-        } catch (_error) {
-            // Continue to platform default.
-        }
+        if (isUsablePythonCommand(candidate)) return candidate;
     }
     return process.platform === 'win32' ? 'python' : 'python3';
+}
+
+function isUsablePythonCommand(commandPath) {
+    if (!commandPath) return false;
+
+    if (!path.isAbsolute(commandPath)) {
+        return true;
+    }
+
+    try {
+        fs.accessSync(commandPath, fs.constants.F_OK | fs.constants.X_OK);
+        return true;
+    } catch (_error) {
+        return false;
+    }
 }
 
 function preparePageImage(imageBuffer, layout = {}, runtimePaths = {}) {

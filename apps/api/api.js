@@ -22,6 +22,7 @@ runtimePaths.ensureRuntimeDirs();
 
 const JWT_SECRET_FILE = runtimePaths.jwtSecretFile;
 const JWT_SECRET = getJwtSecret();
+const JWT_EXPIRES_IN = '8h';
 
 // Configure image storage
 const IMAGE_CONFIG = {
@@ -391,17 +392,32 @@ function sanitizeReceivedPaperFileName(input, extension) {
 
 function getCalibrationPythonCommand() {
     const envPython = String(process.env.SCANCHECK_PYTHON || '').trim();
-    if (envPython && fs.existsSync(envPython)) return envPython;
+    if (envPython && isUsablePythonCommand(envPython)) return envPython;
 
     const localCandidates = [
         path.join(runtimePaths.repoRoot, '.venv', 'bin', 'python'),
         path.join(runtimePaths.repoRoot, '.venv', 'Scripts', 'python.exe')
     ];
     for (const candidate of localCandidates) {
-        if (fs.existsSync(candidate)) return candidate;
+        if (isUsablePythonCommand(candidate)) return candidate;
     }
 
     return process.platform === 'win32' ? 'python' : 'python3';
+}
+
+function isUsablePythonCommand(commandPath) {
+    if (!commandPath) return false;
+
+    if (!path.isAbsolute(commandPath)) {
+        return true;
+    }
+
+    try {
+        fs.accessSync(commandPath, fs.constants.F_OK | fs.constants.X_OK);
+        return true;
+    } catch (_error) {
+        return false;
+    }
 }
 
 function ensureCalibrationInputDir() {
@@ -1168,6 +1184,33 @@ function normalizeStoredSubjectConfig(rawSubjects, { allowZero = true } = {}) {
         .filter((item) => item.code && item.name);
 }
 
+function normalizeSingleSubjectConfig(rawSubjects, title = '', questionCount = 100) {
+    const first = Array.isArray(rawSubjects) && rawSubjects.length > 0 ? rawSubjects[0] : {};
+    const rawTitle = String(title || '').trim();
+    const fallbackName = rawTitle || 'EXAM QUESTIONS';
+    const fallbackCode = fallbackName
+        .replace(/[^a-z0-9]+/gi, ' ')
+        .trim()
+        .split(/\s+/)
+        .map((part) => part.charAt(0))
+        .join('')
+        .slice(0, 8)
+        .toUpperCase() || 'EXAM';
+    const parsedQuestions = Number.parseInt(String(first?.questions ?? questionCount ?? 100), 10);
+    return [{
+        code: String(first?.code || fallbackCode).trim().toUpperCase(),
+        name: String(first?.name || fallbackName).trim().toUpperCase(),
+        questions: Number.isFinite(parsedQuestions) ? Math.min(100, Math.max(1, parsedQuestions)) : 100
+    }];
+}
+
+function normalizeQuizSubjectConfig(format, rawSubjects, title = '', questionCount = 100) {
+    if (format === 'normal') {
+        return normalizeSingleSubjectConfig(rawSubjects, title, questionCount);
+    }
+    return normalizeStoredSubjectConfig(rawSubjects);
+}
+
 function normalizeQuizPayload(payload = {}) {
     const format = (payload.format === 'normal') ? 'normal' : 'multi-subject';
     const parsedQuestionCount = Number.parseInt(String(payload.questionCount || payload.question_count || 0), 10);
@@ -1182,8 +1225,14 @@ function normalizeQuizPayload(payload = {}) {
         questionCount: Number.isFinite(parsedQuestionCount)
             ? Math.min(100, Math.max(1, parsedQuestionCount))
             : 100,
-        subjectConfig: format === 'normal' ? [] : normalizeStoredSubjectConfig(parseSubjectConfigValue(rawSubjectConfig) || rawSubjectConfig)
+        subjectConfig: []
     };
+    normalized.subjectConfig = normalizeQuizSubjectConfig(
+        format,
+        parseSubjectConfigValue(rawSubjectConfig) || rawSubjectConfig,
+        title,
+        normalized.questionCount
+    );
     return normalized;
 }
 
@@ -1544,14 +1593,41 @@ async function getQuizSummary(quizId) {
     }
 
     const rows = await database.query(
-        'SELECT title, question_count FROM quizzes WHERE id = ?',
+        'SELECT title, question_count, format, subject_config FROM quizzes WHERE id = ?',
         [quizId]
     );
 
     return {
         title: rows[0]?.title || null,
-        questionCount: Number(rows[0]?.question_count) || 0
+        questionCount: Number(rows[0]?.question_count) || 0,
+        format: rows[0]?.format || 'multi-subject',
+        subjectConfig: normalizeQuizSubjectConfig(
+            rows[0]?.format === 'normal' ? 'normal' : 'multi-subject',
+            parseSubjectConfigValue(rows[0]?.subject_config) || [],
+            rows[0]?.title || '',
+            Number(rows[0]?.question_count) || 100
+        )
     };
+}
+
+function expandCompactQrCourse(course) {
+    const text = String(course || '').trim();
+    const map = {
+        BSIT: 'Bachelor of Science in Information Technology',
+        BSHM: 'Bachelor of Science in Hospitality Management',
+        BSBA: 'Bachelor of Science in Business Administration',
+        BSCRIM: 'Bachelor of Science in Criminology',
+        BEED: 'Bachelor of Elementary Education',
+        BSED: 'Bachelor of Secondary Education'
+    };
+    return map[text.toUpperCase()] || text;
+}
+
+function expandCompactQrDateTime(dateTime) {
+    const text = String(dateTime || '').trim();
+    const match = text.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})$/);
+    if (!match) return text;
+    return `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}`;
 }
 
 function normalizeQrIdentityData(rawBarcodeData) {
@@ -1565,17 +1641,16 @@ function normalizeQrIdentityData(rawBarcodeData) {
     };
 
     return {
-        sheetId: firstNonEmpty(source.sheetId, source.sheet_id, source.formId, source.form_id),
-        sheet_id: firstNonEmpty(source.sheet_id, source.sheetId, source.formId, source.form_id),
+        sheetId: firstNonEmpty(source.sheetId, source.sheet_id, source.formId, source.form_id, source.s),
+        sheet_id: firstNonEmpty(source.sheet_id, source.sheetId, source.formId, source.form_id, source.s),
         studentId: firstNonEmpty(source.studentId, source.student_id, source.id, source.studentNo, source.student_no),
-        examId: firstNonEmpty(source.examId, source.exam_id, source.quizId, source.quiz_id, source.testId, source.test_id),
-        exam_id: firstNonEmpty(source.exam_id, source.examId, source.quizId, source.quiz_id, source.testId, source.test_id),
-        studentName: firstNonEmpty(source.studentName, source.student_name, source.name),
-        course: firstNonEmpty(source.course),
-        age: firstNonEmpty(source.age),
-        roomNo: firstNonEmpty(source.roomNo, source.room_no, source.room),
-        seatNo: firstNonEmpty(source.seatNo, source.seat_no, source.seat),
-        dateTime: firstNonEmpty(source.dateTime, source.date_time)
+        examId: firstNonEmpty(source.examId, source.exam_id, source.quizId, source.quiz_id, source.testId, source.test_id, source.e),
+        exam_id: firstNonEmpty(source.exam_id, source.examId, source.quizId, source.quiz_id, source.testId, source.test_id, source.e),
+        studentName: firstNonEmpty(source.studentName, source.student_name, source.name, source.n),
+        course: expandCompactQrCourse(firstNonEmpty(source.course, source.c)),
+        age: firstNonEmpty(source.age, source.a),
+        roomNo: firstNonEmpty(source.roomNo, source.room_no, source.room, source.r),
+        dateTime: expandCompactQrDateTime(firstNonEmpty(source.dateTime, source.date_time, source.t))
     };
 }
 
@@ -1619,7 +1694,6 @@ async function resolveStudentMetadataFromQr(barcodeData = {}, quizId = null) {
         course: cleanExtractedField(row.course || '', 'course') || '',
         age: firstNonEmptyText(row.age),
         roomNo: firstNonEmptyText(row.room_no, row.roomNo),
-        seatNo: firstNonEmptyText(row.seat_no, row.seatNo),
         dateTime: firstNonEmptyText(row.exam_date_time, row.dateTime, row.date_time, qr.dateTime, qr.date_time),
         source: row._source || ''
     });
@@ -1632,7 +1706,7 @@ async function resolveStudentMetadataFromQr(barcodeData = {}, quizId = null) {
             recordParams.push(selectedQuizId);
         }
         const recordRows = await database.query(
-            `SELECT sheet_id, student_id, student_name, course, age, room_no, seat_no, 'records' AS _source
+            `SELECT sheet_id, student_id, student_name, course, age, room_no, 'records' AS _source
              FROM records
              WHERE ${recordWhere}
              ORDER BY timestamp DESC, id DESC
@@ -1651,7 +1725,7 @@ async function resolveStudentMetadataFromQr(barcodeData = {}, quizId = null) {
             scanParams.push(selectedQuizId);
         }
         const scanRows = await database.query(
-            `SELECT sheet_id, student_id, student_name, course, room_no, seat_no, 'scans' AS _source
+            `SELECT sheet_id, student_id, student_name, course, room_no, 'scans' AS _source
              FROM scans
              WHERE ${scanWhere}
              ORDER BY timestamp DESC, id DESC
@@ -1676,7 +1750,7 @@ async function resolveStudentMetadataFromQr(barcodeData = {}, quizId = null) {
             paperParams.push(examId);
         }
         const paperRows = await database.query(
-            `SELECT student_id, sheet_id, student_name, course, age, room_no, seat_no, 'received_papers' AS _source
+            `SELECT student_id, sheet_id, student_name, course, age, room_no, 'received_papers' AS _source
              FROM received_papers
              WHERE ${paperWhere.join(' AND ')}
              ORDER BY timestamp DESC, id DESC
@@ -1714,7 +1788,6 @@ async function createAutomaticRecord({
     course,
     age,
     roomNo,
-    seatNo,
     answers,
     rawText,
     imagePath,
@@ -1754,7 +1827,7 @@ async function createAutomaticRecord({
             course || null,
             age || null,
             roomNo || null,
-            seatNo || null,
+            null,
             JSON.stringify(answerArray),
             rawText || null,
             normalizeStoredImagePath(imagePath),
@@ -2033,11 +2106,30 @@ router.post('/auth/login', async (req, res) => {
             return res.status(400).json({ error: 'Invalid username or password' });
         }
 
-        const token = jwt.sign({ id: user[0].id, username: user[0].username }, JWT_SECRET, { expiresIn: '1h' });
+        const token = jwt.sign({ id: user[0].id, username: user[0].username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
         res.json({ token });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
+});
+
+router.post('/auth/refresh', (req, res) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if (!token) {
+        return res.sendStatus(401);
+    }
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+        if (err) {
+            return res.sendStatus(403);
+        }
+        const freshToken = jwt.sign(
+            { id: user.id, username: user.username },
+            JWT_SECRET,
+            { expiresIn: JWT_EXPIRES_IN }
+        );
+        res.json({ token: freshToken });
+    });
 });
 
 // --- PROTECTED ROUTES ---
@@ -2057,7 +2149,12 @@ router.get('/quizzes', authenticateToken, async (req, res) => {
         `);
         const parsedQuizzes = quizzes.map(quiz => ({
             ...quiz,
-            subjectConfig: normalizeStoredSubjectConfig(parseSubjectConfigValue(quiz.subjectConfig) || quiz.subjectConfig),
+            subjectConfig: normalizeQuizSubjectConfig(
+                quiz.format === 'normal' ? 'normal' : 'multi-subject',
+                parseSubjectConfigValue(quiz.subjectConfig) || quiz.subjectConfig,
+                quiz.title,
+                quiz.questionCount
+            ),
             correctAnswers: quiz.correctAnswers ? JSON.parse(quiz.correctAnswers) : null
         }));
         res.json(parsedQuizzes);
@@ -2087,7 +2184,12 @@ router.post('/quizzes', authenticateToken, async (req, res) => {
             [result.id]
         );
         
-        newQuiz[0].subjectConfig = normalizeStoredSubjectConfig(parseSubjectConfigValue(newQuiz[0].subjectConfig) || newQuiz[0].subjectConfig);
+        newQuiz[0].subjectConfig = normalizeQuizSubjectConfig(
+            newQuiz[0].format === 'normal' ? 'normal' : 'multi-subject',
+            parseSubjectConfigValue(newQuiz[0].subjectConfig) || newQuiz[0].subjectConfig,
+            newQuiz[0].title,
+            newQuiz[0].questionCount
+        );
         if (newQuiz[0].correctAnswers) {
             newQuiz[0].correctAnswers = JSON.parse(newQuiz[0].correctAnswers);
         }
@@ -2101,16 +2203,21 @@ router.post('/quizzes', authenticateToken, async (req, res) => {
 router.put('/quizzes/:id', authenticateToken, async (req, res) => {
     try {
         const { correctAnswers } = req.body;
+        const hasCorrectAnswers = Object.prototype.hasOwnProperty.call(req.body || {}, 'correctAnswers');
         const normalizedQuiz = normalizeQuizPayload(req.body);
         await database.run(
-            'UPDATE quizzes SET title = ?, question_count = ?, options = ?, format = ?, subject_config = ?, correct_answers = ? WHERE id = ?',
+            `UPDATE quizzes
+             SET title = ?, question_count = ?, options = ?, format = ?, subject_config = ?,
+                 correct_answers = CASE WHEN ? THEN ? ELSE correct_answers END
+             WHERE id = ?`,
             [
                 normalizedQuiz.title,
                 normalizedQuiz.questionCount,
                 normalizedQuiz.options,
                 normalizedQuiz.format,
                 JSON.stringify(normalizedQuiz.subjectConfig),
-                correctAnswers ? JSON.stringify(correctAnswers) : null,
+                hasCorrectAnswers ? 1 : 0,
+                hasCorrectAnswers ? JSON.stringify(correctAnswers || []) : null,
                 req.params.id
             ]
         );
@@ -2120,7 +2227,12 @@ router.put('/quizzes/:id', authenticateToken, async (req, res) => {
             [req.params.id]
         );
         
-        updatedQuiz[0].subjectConfig = normalizeStoredSubjectConfig(parseSubjectConfigValue(updatedQuiz[0].subjectConfig) || updatedQuiz[0].subjectConfig);
+        updatedQuiz[0].subjectConfig = normalizeQuizSubjectConfig(
+            updatedQuiz[0].format === 'normal' ? 'normal' : 'multi-subject',
+            parseSubjectConfigValue(updatedQuiz[0].subjectConfig) || updatedQuiz[0].subjectConfig,
+            updatedQuiz[0].title,
+            updatedQuiz[0].questionCount
+        );
         if (updatedQuiz[0].correctAnswers) {
             updatedQuiz[0].correctAnswers = JSON.parse(updatedQuiz[0].correctAnswers);
         }
@@ -2142,7 +2254,6 @@ router.put('/records/:id', authenticateToken, async (req, res) => {
             section,
             age,
             roomNo,
-            seatNo,
             examDateTime,
             entryType,
             specialEquityGroup,
@@ -2157,22 +2268,21 @@ router.put('/records/:id', authenticateToken, async (req, res) => {
         const result = await database.run(
             `UPDATE records SET 
                 student_name = ?, 
-                sheet_id = ?, 
+                sheet_id = COALESCE(?, sheet_id),
                 course = ?, 
                 subject = ?, 
                 section = ?, 
                 age = ?, 
                 room_no = ?, 
-                seat_no = ?, 
-                exam_date_time = ?,
+                exam_date_time = COALESCE(?, exam_date_time),
                 entry_type = ?, 
                 special_equity_group = ?, 
                 score = ?, 
                 total_questions = ?, 
                 percentage = ?, 
                 status = ?, 
-                answers = ?, 
-                review_status = ? 
+                answers = COALESCE(?, answers),
+                review_status = COALESCE(?, review_status)
             WHERE id = ?`,
             [
                 studentName,
@@ -2182,7 +2292,6 @@ router.put('/records/:id', authenticateToken, async (req, res) => {
                 section,
                 age,
                 roomNo,
-                seatNo,
                 examDateTime,
                 entryType,
                 specialEquityGroup,
@@ -2190,8 +2299,8 @@ router.put('/records/:id', authenticateToken, async (req, res) => {
                 totalQuestions,
                 percentage,
                 status,
-                Array.isArray(answers) ? JSON.stringify(answers) : answers,
-                reviewStatus || 'manually_corrected',
+                answers == null ? null : (Array.isArray(answers) ? JSON.stringify(answers) : answers),
+                reviewStatus || null,
                 req.params.id
             ]
         );
@@ -2375,6 +2484,7 @@ router.delete('/quizzes/:quizId/answer-key', authenticateToken, async (req, res)
 
 router.get('/scans', authenticateToken, async (req, res) => {
     try {
+        await ensureSubjectScoreBackfill();
         const { page = 1, limit = 50, quizId, department, status, entryType, residencyType, equityGroup } = req.query;
         const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
         const limitNumber = Math.max(parseInt(limit, 10) || 50, 1);
@@ -2635,7 +2745,6 @@ router.post('/records/ocr', authenticateToken, async (req, res) => {
             section,
             age,
             room_no,
-            seat_no,
             entry_type,
             residency_type,
             special_equity_group,
@@ -2683,7 +2792,7 @@ router.post('/records/ocr', authenticateToken, async (req, res) => {
                 ? answers.map(answer => String(answer || '').trim().toUpperCase())
                 : [];
             // Calculate subject scores for OCR scans (new)            
-            const subjectResults = await calculateSubjectScores(answerArray, quiz_id);
+            let subjectResults = await calculateSubjectScores(answerArray, quiz_id);
             
             let score = manualScore !== undefined && manualScore !== '' ? Number(manualScore) : null;
             let totalQuestions = questionCount || answerArray.length || 0;
@@ -2707,6 +2816,16 @@ router.post('/records/ocr', authenticateToken, async (req, res) => {
         }
 
         const status = percentage >= 75 ? 'PASS' : 'FAIL';
+        const quizSummary = await getQuizSummary(quiz_id);
+        if (quizSummary.format === 'normal') {
+            subjectResults = buildSingleSubjectResultsFromOverall({
+                quizSummary,
+                score,
+                totalQuestions,
+                percentage: Number.parseFloat(String(percentage || 0)) || 0,
+                status
+            });
+        }
 
         const submittedRecordPaperId = String(sheet_id || sheetId || extStudentId || '').trim();
         const resolvedRecordPaperId = submittedRecordPaperId || generateShortOcrPaperId();
@@ -2776,7 +2895,7 @@ router.post('/records/ocr', authenticateToken, async (req, res) => {
                 course || null,
                 age || null,
                 room_no || null,
-                seat_no || null,
+                null,
                 JSON.stringify(answerArray),
                 raw_text || null,
                 finalImagePath || null,
@@ -2789,6 +2908,11 @@ router.post('/records/ocr', authenticateToken, async (req, res) => {
         try {
             const numericPercentage = Number.parseFloat(String(percentage || 0)) || 0;
             const scanStatus = numericPercentage >= 75 ? 'PASS' : 'FAIL';
+            const legacyEng = getSubjectScoreEntry(subjectResults, 'ENG');
+            const legacySci = getSubjectScoreEntry(subjectResults, 'SCI');
+            const legacyMath = getSubjectScoreEntry(subjectResults, 'MATH');
+            const legacyGen = getSubjectScoreEntry(subjectResults, 'GEN');
+            const legacyAbs = getSubjectScoreEntry(subjectResults, 'ABS');
             const scanColumns = [
                 'sheet_id', 'student_id', 'student_name', 'quiz_id', 'answers',
                 'score', 'total_score', 'total_questions', 'percentage', 'overall_percentage',
@@ -2798,6 +2922,7 @@ router.post('/records/ocr', authenticateToken, async (req, res) => {
                 'english_percentage', 'science_percentage', 'math_percentage', 'general_percentage', 'abstract_percentage',
                 'english_status', 'science_status', 'math_status', 'general_status', 'abstract_status',
                 'image_path', 'course', 'room_no', 'seat_no',
+                'score_breakdown', 'subject_scores',
                 'entry_type', 'residency_type', 'special_equity_group', 'proctor_status', 'scanned_by'
             ];
             const scanValues = [
@@ -2814,14 +2939,16 @@ router.post('/records/ocr', authenticateToken, async (req, res) => {
                 scanStatus,
                 scanStatus,
                 // --- SUBJECT VALUES ---------------------------------------------------
-                subjectResults.ENG.score, subjectResults.SCI.score, subjectResults.MATH.score, subjectResults.GEN.score, subjectResults.ABS.score,
-                subjectResults.ENG.percentage, subjectResults.SCI.percentage, subjectResults.MATH.percentage, subjectResults.GEN.percentage, subjectResults.ABS.percentage,
-                subjectResults.ENG.status, subjectResults.SCI.status, subjectResults.MATH.status, subjectResults.GEN.status, subjectResults.ABS.status,
+                legacyEng.score, legacySci.score, legacyMath.score, legacyGen.score, legacyAbs.score,
+                legacyEng.percentage, legacySci.percentage, legacyMath.percentage, legacyGen.percentage, legacyAbs.percentage,
+                legacyEng.status, legacySci.status, legacyMath.status, legacyGen.status, legacyAbs.status,
                 // -----------------------------------------------------------------------
                 finalImagePath || null,
                 course || null,
                 room_no || null,
-                seat_no || null,
+                null,
+                JSON.stringify(Object.fromEntries(Object.entries(subjectResults).filter(([key]) => !['totalScore', 'totalQuestions', 'overallPercentage', 'overallStatus', 'scoringStatus'].includes(key)).map(([key, value]) => [key, value?.score || 0]))),
+                JSON.stringify(subjectResults),
                 entry_type || null,
                 residency_type || null,
                 special_equity_group || null,
@@ -2829,10 +2956,21 @@ router.post('/records/ocr', authenticateToken, async (req, res) => {
                 req.user?.username || null
             ];
 
-            await database.run(
+            const mirroredScan = await database.run(
                 `INSERT INTO scans (${scanColumns.join(', ')}) VALUES (${scanColumns.map(() => '?').join(', ')})`,
                 scanValues
             );
+            await saveSubjectRecordsForScan({
+                scanId: mirroredScan.id,
+                studentId: '',
+                studentName: String(student_name).trim(),
+                subjectResults,
+                entryType: entry_type || null,
+                residencyType: residency_type || null,
+                equityGroup: special_equity_group || null,
+                roomNo: room_no || null,
+                examDateTime: exam_date_time || null
+            });
         } catch (scanMirrorError) {
             console.warn('Could not mirror OCR record into scans table:', scanMirrorError.message);
         }
@@ -2851,6 +2989,7 @@ router.post('/records/ocr', authenticateToken, async (req, res) => {
 
 router.get('/scores/report', authenticateToken, async (req, res) => {
     try {
+        await ensureSubjectScoreBackfill();
         const { quizId, dateFrom, dateTo, entryType, equityGroup } = req.query;
         
         // End-of-day handling so a date-only dateTo includes the whole day
@@ -3429,56 +3568,63 @@ async function processAndStoreImage(base64Data, studentId) {
 
 // Calculate subject scores
 async function calculateSubjectScores(answers, quizId = null) {
-    const subjectBoundaries = {
-        ENG: { start: 0, end: 19 },
-        SCI: { start: 20, end: 39 },
-        MATH: { start: 40, end: 59 },
-        GEN: { start: 60, end: 79 },
-        ABS: { start: 80, end: 99 }
-    };
-
+    const quizRows = quizId
+        ? await database.query('SELECT title, question_count, format, subject_config FROM quizzes WHERE id = ?', [quizId])
+        : [];
+    const quiz = quizRows[0] || {};
+    const totalQuestions = Math.max(1, Math.min(100, Number.parseInt(String(quiz.question_count || answers.length || 100), 10) || 100));
+    const format = quiz.format === 'normal' ? 'normal' : 'multi-subject';
+    const subjects = normalizeQuizSubjectConfig(
+        format,
+        parseSubjectConfigValue(quiz.subject_config) || [],
+        quiz.title || '',
+        totalQuestions
+    );
     const results = {};
     let totalScore = 0;
-    const totalQuestions = answers.length || 100;
 
-    // Get all correct answers for the quiz if available
     let allCorrectAnswers = null;
     if (quizId) {
         allCorrectAnswers = await getCorrectAnswersForQuiz(quizId);
     }
 
-    for (const [subject, range] of Object.entries(subjectBoundaries)) {
-        const subjectAnswers = answers.slice(range.start, range.end + 1);
-        
-        let correctAnswers;
-        if (allCorrectAnswers && allCorrectAnswers.length > range.start) {
-            // Use the quiz's answer key if available for this range
-            correctAnswers = allCorrectAnswers.slice(range.start, Math.min(range.end + 1, allCorrectAnswers.length));
-            // Pad with fallback if the quiz key is too short for this subject
-            if (correctAnswers.length < 20) {
-                const fallback = await getCorrectAnswersForSubject(subject);
-                correctAnswers = [...correctAnswers, ...fallback.slice(correctAnswers.length)];
-            }
-        } else {
-            correctAnswers = await getCorrectAnswersForSubject(subject);
-        }
-        
+    let cursor = 0;
+    subjects.forEach((subject, index) => {
+        const count = Math.max(1, Math.min(totalQuestions - cursor || totalQuestions, Number(subject.questions) || totalQuestions));
+        const subjectAnswers = answers.slice(cursor, cursor + count);
+        const correctAnswers = Array.isArray(allCorrectAnswers)
+            ? allCorrectAnswers.slice(cursor, cursor + count)
+            : [];
         let score = 0;
         for (let i = 0; i < subjectAnswers.length; i++) {
             const studentAns = String(subjectAnswers[i] || '').trim().toUpperCase();
             const correctAns = String(correctAnswers[i] || '').trim().toUpperCase();
-            
             if (studentAns && correctAns && studentAns === correctAns) {
                 score++;
             }
         }
-        
-        const percentage = (score / 20) * 100;
+        const percentage = count > 0 ? (score / count) * 100 : 0;
         const status = percentage >= 75 ? 'PASS' : 'FAIL';
+        const keyBase = String(subject.code || subject.name || `SUB${index + 1}`).trim().toUpperCase() || `SUB${index + 1}`;
+        let key = keyBase;
+        let suffix = 2;
+        while (results[key]) {
+            key = `${keyBase}_${suffix++}`;
+        }
 
-        results[subject] = { score, total: 20, percentage: percentage.toFixed(1), status };
+        results[key] = {
+            code: keyBase,
+            name: String(subject.name || keyBase).trim().toUpperCase(),
+            score,
+            total: count,
+            percentage: percentage.toFixed(1),
+            status,
+            start: cursor + 1,
+            end: cursor + count
+        };
         totalScore += score;
-    }
+        cursor += count;
+    });
 
     const overallPercentage = (totalScore / totalQuestions) * 100;
     const overallStatus = overallPercentage >= 75 ? 'PASS' : 'FAIL';
@@ -3508,6 +3654,179 @@ function buildIncompleteSubjectScores(totalQuestions = 100) {
     };
 }
 
+function getSubjectScoreEntry(subjectResults = {}, key) {
+    const item = subjectResults[key] || {};
+    return {
+        score: Number(item.score) || 0,
+        total: Number(item.total) || 0,
+        percentage: Number.parseFloat(String(item.percentage || 0)).toFixed(1),
+        status: item.status || 'INCOMPLETE'
+    };
+}
+
+async function saveSubjectRecordsForScan({
+    scanId,
+    studentId,
+    studentName,
+    subjectResults,
+    entryType,
+    residencyType,
+    equityGroup,
+    roomNo,
+    examDateTime
+}) {
+    if (!scanId || !subjectResults || typeof subjectResults !== 'object') return;
+    for (const [key, result] of Object.entries(subjectResults)) {
+        if (['totalScore', 'totalQuestions', 'overallPercentage', 'overallStatus', 'scoringStatus'].includes(key)) continue;
+        if (!result || typeof result !== 'object') continue;
+        const code = String(result.code || key).trim().toUpperCase();
+        const name = String(result.name || code).trim().toUpperCase();
+        const subjectInfo = await getSubjectInfo(code);
+        await database.run(
+            `INSERT INTO subject_records (student_id, student_name, subject_id,
+             subject_code, subject_name, score, total_questions, percentage, status, scan_id,
+             entry_type, residency_type, special_equity_group, room_no, seat_no, exam_date_time)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                studentId || 'N/A',
+                studentName || 'Anonymous',
+                subjectInfo.id || 0,
+                code,
+                name,
+                Number(result.score) || 0,
+                Number(result.total) || 0,
+                Number.parseFloat(String(result.percentage || 0)).toFixed(1),
+                result.status || 'FAIL',
+                scanId,
+                entryType || null,
+                residencyType || null,
+                equityGroup || null,
+                roomNo || null,
+                null,
+                examDateTime || null
+            ]
+        );
+    }
+}
+
+function buildSingleSubjectResultsFromOverall({ quizSummary = {}, score = 0, totalQuestions = 100, percentage = null, status = null }) {
+    const subject = normalizeQuizSubjectConfig(
+        'normal',
+        quizSummary.subjectConfig || [],
+        quizSummary.title || '',
+        totalQuestions
+    )[0];
+    const total = Math.max(1, Number(totalQuestions) || Number(subject.questions) || 100);
+    const numericScore = Number(score) || 0;
+    const pct = Number.isFinite(Number(percentage))
+        ? Number(Number(percentage).toFixed(1))
+        : Number(((numericScore / total) * 100).toFixed(1));
+    const finalStatus = status || (pct >= 75 ? 'PASS' : 'FAIL');
+    const key = subject.code || 'EXAM';
+    return {
+        [key]: {
+            code: key,
+            name: subject.name || quizSummary.title || 'EXAM QUESTIONS',
+            score: numericScore,
+            total,
+            percentage: pct.toFixed(1),
+            status: finalStatus,
+            start: 1,
+            end: total
+        },
+        totalScore: numericScore,
+        totalQuestions: total,
+        overallPercentage: pct.toFixed(1),
+        overallStatus: finalStatus
+    };
+}
+
+let subjectScoreBackfillPromise = null;
+
+async function backfillMissingSubjectScores() {
+    const scans = await database.query(`
+        SELECT id, student_id, student_name, quiz_id, answers, entry_type, residency_type,
+               special_equity_group, room_no, exam_date_time, subject_scores,
+               score, total_questions, percentage, status, overall_status
+        FROM scans
+        WHERE answers IS NOT NULL
+          AND (subject_scores IS NULL OR TRIM(subject_scores) = '')
+        LIMIT 500
+    `);
+    let updated = 0;
+    for (const scan of scans) {
+        let answers = [];
+        try {
+            const parsed = JSON.parse(scan.answers || '[]');
+            answers = Array.isArray(parsed) ? parsed : [];
+        } catch (_error) {
+            answers = [];
+        }
+        if (!answers.length) continue;
+        const quizSummary = await getQuizSummary(scan.quiz_id);
+        const subjectResults = quizSummary.format === 'normal'
+            ? buildSingleSubjectResultsFromOverall({
+                quizSummary,
+                score: scan.score,
+                totalQuestions: scan.total_questions || answers.length || 100,
+                percentage: scan.percentage,
+                status: scan.overall_status || scan.status
+            })
+            : await calculateSubjectScores(answers, scan.quiz_id);
+        const legacyEng = getSubjectScoreEntry(subjectResults, 'ENG');
+        const legacySci = getSubjectScoreEntry(subjectResults, 'SCI');
+        const legacyMath = getSubjectScoreEntry(subjectResults, 'MATH');
+        const legacyGen = getSubjectScoreEntry(subjectResults, 'GEN');
+        const legacyAbs = getSubjectScoreEntry(subjectResults, 'ABS');
+        await database.run(`
+            UPDATE scans
+            SET english_score = ?, english_percentage = ?, english_status = ?,
+                science_score = ?, science_percentage = ?, science_status = ?,
+                math_score = ?, math_percentage = ?, math_status = ?,
+                general_score = ?, general_percentage = ?, general_status = ?,
+                abstract_score = ?, abstract_percentage = ?, abstract_status = ?,
+                score_breakdown = ?, subject_scores = ?
+            WHERE id = ?
+        `, [
+            legacyEng.score, legacyEng.percentage, legacyEng.status,
+            legacySci.score, legacySci.percentage, legacySci.status,
+            legacyMath.score, legacyMath.percentage, legacyMath.status,
+            legacyGen.score, legacyGen.percentage, legacyGen.status,
+            legacyAbs.score, legacyAbs.percentage, legacyAbs.status,
+            JSON.stringify(Object.fromEntries(Object.entries(subjectResults).filter(([key]) => !['totalScore', 'totalQuestions', 'overallPercentage', 'overallStatus', 'scoringStatus'].includes(key)).map(([key, value]) => [key, value?.score || 0]))),
+            JSON.stringify(subjectResults),
+            scan.id
+        ]);
+        await database.run('DELETE FROM subject_records WHERE scan_id = ?', [scan.id]);
+        await saveSubjectRecordsForScan({
+            scanId: scan.id,
+            studentId: scan.student_id || 'N/A',
+            studentName: scan.student_name || 'Anonymous',
+            subjectResults,
+            entryType: scan.entry_type || null,
+            residencyType: scan.residency_type || null,
+            equityGroup: scan.special_equity_group || null,
+            roomNo: scan.room_no || null,
+            examDateTime: scan.exam_date_time || null
+        });
+        updated++;
+    }
+    if (updated > 0) {
+        console.log(`[Reports] Backfilled subject scores for ${updated} scan(s).`);
+    }
+    return updated;
+}
+
+async function ensureSubjectScoreBackfill() {
+    if (!subjectScoreBackfillPromise) {
+        subjectScoreBackfillPromise = backfillMissingSubjectScores().catch((error) => {
+            console.warn('[Reports] Subject score backfill skipped:', error.message);
+            return 0;
+        });
+    }
+    return subjectScoreBackfillPromise;
+}
+
 // New endpoint: Process image on server and create scan record
 router.post('/scans/process', async (req, res) => {
     try {
@@ -3529,7 +3848,6 @@ router.post('/scans/process', async (req, res) => {
         const manualResidencyType = body.residencyType || body.residency_type;
         const manualEquityGroup = body.specialEquityGroup || body.special_equity_group;
         const manualRoomNo = body.roomNo || body.room_no || body.room;
-        const manualSeatNo = body.seatNo || body.seat_no || body.seat;
         const manualCourse = body.course;
         const manualAge = body.age;
         const requestedSubjects = body.subjects;
@@ -3595,13 +3913,13 @@ router.post('/scans/process', async (req, res) => {
             
             const senderIp = req.ip || req.connection?.remoteAddress || '0.0.0.0';
             const queuedPaper = await database.run(
-                'INSERT INTO received_papers (student_name, course, age, room_no, seat_no, entry_type, residency_type, equity_group, image_path, sender_ip, device_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [
-                    fallbackStudentName,
-                    manualCourse || 'Unassigned Course',
-                    manualAge || null,
-                    manualRoomNo || null,
-                    manualSeatNo || null,
+	                'INSERT INTO received_papers (student_name, course, age, room_no, seat_no, entry_type, residency_type, equity_group, image_path, sender_ip, device_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+	                [
+	                    fallbackStudentName,
+	                    manualCourse || 'Unassigned Course',
+	                    manualAge || null,
+	                    manualRoomNo || null,
+	                    null,
                     manualEntryType || null,
                     manualResidencyType || null,
                     manualEquityGroup || null,
@@ -3688,7 +4006,6 @@ router.post('/scans/process', async (req, res) => {
         const finalCourse = cleanExtractedField(manualCourse || qrStudentMetadata.course || barcodeData.course || '', 'course') || null;
         const finalAge = firstNonEmptyText(manualAge, qrStudentMetadata.age, barcodeData.age) || null;
         const finalRoomNo = firstNonEmptyText(manualRoomNo, qrStudentMetadata.roomNo, barcodeData.roomNo, barcodeData.room_no) || null;
-        const finalSeatNo = firstNonEmptyText(manualSeatNo, qrStudentMetadata.seatNo, barcodeData.seatNo, barcodeData.seat_no) || null;
         // Entry/Equity must come from OMR bubbles (or explicit manual override), not QR/OCR text.
         const finalEntryType = manualEntryType || omrResult.entryType || null;
         const finalResidencyType = manualResidencyType || omrResult.residencyType || null;
@@ -3704,23 +4021,21 @@ router.post('/scans/process', async (req, res) => {
                          student_id = COALESCE(NULLIF(student_id, ''), ?),
                          exam_id = COALESCE(NULLIF(exam_id, ''), ?),
                          student_name = ?,
-                         course = ?,
-                         age = COALESCE(?, age),
-                         room_no = COALESCE(?, room_no),
-                         seat_no = COALESCE(?, seat_no),
-                         exam_date_time = ?
-                     WHERE id = ?`,
+	                         course = ?,
+	                         age = COALESCE(?, age),
+	                         room_no = COALESCE(?, room_no),
+	                         exam_date_time = ?
+	                     WHERE id = ?`,
                     [
                         barcodeData.sheetId || null,
                         finalStudentId || null,
                         barcodeData.examId || barcodeData.exam_id || null,
                         finalStudentName,
-                        finalCourse || 'Unassigned Course',
-                        finalAge,
-                        finalRoomNo,
-                        finalSeatNo,
-                        barcodeData.dateTime || null,
-                        queuedPaperId
+	                        finalCourse || 'Unassigned Course',
+	                        finalAge,
+	                        finalRoomNo,
+	                        barcodeData.dateTime || null,
+	                        queuedPaperId
                     ]
                 );
             } catch (queueUpdateErr) {
@@ -3747,6 +4062,11 @@ router.post('/scans/process', async (req, res) => {
             // Use 'PASS' or 'FAIL' for overall exam status
             const status = scoringIncomplete ? 'INCOMPLETE' : (parseFloat(subjectResults.overallPercentage) >= 75 ? 'PASS' : 'FAIL');
             const responseMetadata = buildScanResponseMetadata(omrResult, omrResult.scoringStatus);
+            const legacyEng = getSubjectScoreEntry(subjectResults, 'ENG');
+            const legacySci = getSubjectScoreEntry(subjectResults, 'SCI');
+            const legacyMath = getSubjectScoreEntry(subjectResults, 'MATH');
+            const legacyGen = getSubjectScoreEntry(subjectResults, 'GEN');
+            const legacyAbs = getSubjectScoreEntry(subjectResults, 'ABS');
 
             // Save to database
             const scanColumns = [
@@ -3755,7 +4075,7 @@ router.post('/scans/process', async (req, res) => {
                 'english_score', 'science_score', 'math_score', 'general_score', 'abstract_score',
                 'english_percentage', 'science_percentage', 'math_percentage', 'general_percentage', 'abstract_percentage',
                 'english_status', 'science_status', 'math_status', 'general_status', 'abstract_status',
-                'photo', 'image_path', 'thumbnail_path', 'course', 'room_no', 'seat_no', 'exam_date_time', 'score_breakdown', 'subject_scores',
+	                'photo', 'image_path', 'thumbnail_path', 'course', 'room_no', 'seat_no', 'exam_date_time', 'score_breakdown', 'subject_scores',
                 'entry_type', 'residency_type', 'special_equity_group', 'proctor_status'
             ];
             const scanValues = [
@@ -3763,28 +4083,16 @@ router.post('/scans/process', async (req, res) => {
                 subjectResults.totalScore, subjectResults.totalScore, subjectResults.totalQuestions,
                 subjectResults.overallPercentage, subjectResults.overallPercentage,
                 status, status,
-                subjectResults.ENG.score, subjectResults.SCI.score, subjectResults.MATH.score,
-                subjectResults.GEN.score, subjectResults.ABS.score,
-                subjectResults.ENG.percentage, subjectResults.SCI.percentage, subjectResults.MATH.percentage,
-                subjectResults.GEN.percentage, subjectResults.ABS.percentage,
-                subjectResults.ENG.status, subjectResults.SCI.status, subjectResults.MATH.status,
-                subjectResults.GEN.status, subjectResults.ABS.status,
+                legacyEng.score, legacySci.score, legacyMath.score,
+                legacyGen.score, legacyAbs.score,
+                legacyEng.percentage, legacySci.percentage, legacyMath.percentage,
+                legacyGen.percentage, legacyAbs.percentage,
+                legacyEng.status, legacySci.status, legacyMath.status,
+                legacyGen.status, legacyAbs.status,
                 photo || null, imageData?.imagePath || null, imageData?.thumbnailPath || null,
-                finalCourse, finalRoomNo, finalSeatNo, barcodeData.dateTime || null,
-                JSON.stringify({
-                    ENG: subjectResults.ENG.score,
-                    SCI: subjectResults.SCI.score,
-                    MATH: subjectResults.MATH.score,
-                    GEN: subjectResults.GEN.score,
-                    ABS: subjectResults.ABS.score
-                }),
-                JSON.stringify({
-                    ENG: subjectResults.ENG,
-                    SCI: subjectResults.SCI,
-                    MATH: subjectResults.MATH,
-                    GEN: subjectResults.GEN,
-                    ABS: subjectResults.ABS
-                }),
+	                finalCourse, finalRoomNo, null, barcodeData.dateTime || null,
+                JSON.stringify(Object.fromEntries(Object.entries(subjectResults).filter(([key]) => !['totalScore', 'totalQuestions', 'overallPercentage', 'overallStatus', 'scoringStatus'].includes(key)).map(([key, value]) => [key, value?.score || 0]))),
+                JSON.stringify(subjectResults),
                 finalEntryType,
                 finalResidencyType,
                 finalEquityGroup,
@@ -3795,30 +4103,17 @@ router.post('/scans/process', async (req, res) => {
                 scanValues
             );
 
-            // Save individual subject records
-            const subjectsList = ['ENG', 'SCI', 'MATH', 'GEN', 'ABS'];
-            for (const subCode of subjectsList) {
-                const subjectInfo = await getSubjectInfo(subCode);
-                const resSub = subjectResults[subCode];
-                
-                await database.run(
-                    `INSERT INTO subject_records (student_id, student_name, subject_id, 
-                     subject_code, subject_name, score, total_questions, percentage, status, scan_id,
-                     entry_type, residency_type, special_equity_group, room_no, seat_no, exam_date_time) 
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                    [
-                        studentId || 'N/A', finalStudentName, subjectInfo.id, subjectInfo.code, 
-                        subjectInfo.name, resSub.score, 20, resSub.percentage, 
-                        parseFloat(resSub.percentage) >= 75 ? 'PASS' : 'FAIL', scanResult.id,
-                        finalEntryType,
-                        finalResidencyType,
-                        finalEquityGroup,
-                        finalRoomNo,
-                        finalSeatNo,
-                        barcodeData.dateTime || null
-                    ]
-                );
-            }
+            await saveSubjectRecordsForScan({
+                scanId: scanResult.id,
+                studentId: studentId || 'N/A',
+                studentName: finalStudentName,
+                subjectResults,
+                entryType: finalEntryType,
+                residencyType: finalResidencyType,
+                equityGroup: finalEquityGroup,
+                roomNo: finalRoomNo,
+                examDateTime: barcodeData.dateTime || null
+            });
 
             const recordId = await createAutomaticRecord({
                 studentId: finalStudentId,
@@ -3836,11 +4131,10 @@ router.post('/scans/process', async (req, res) => {
                 subjectCode: 'ALL',
                 subject: finalSubject,
                 section: finalSection,
-                course: finalCourse,
-                age: finalAge,
-                roomNo: finalRoomNo,
-                seatNo: finalSeatNo,
-                answers: omrResult.answers,
+	                course: finalCourse,
+	                age: finalAge,
+	                roomNo: finalRoomNo,
+	                answers: omrResult.answers,
                 rawText: '',
                 imagePath: imageData?.imagePath,
                 reviewStatus: responseMetadata.reviewStatus || ((omrResult.overallConfidence || 0) >= 0.55 ? 'auto_scanned' : 'needs_review')
@@ -3853,11 +4147,10 @@ router.post('/scans/process', async (req, res) => {
                 recordId,
                 studentId: studentId,
                 studentName: finalStudentName,
-                course: finalCourse,
-                age: finalAge,
-                roomNo: finalRoomNo,
-                seatNo: finalSeatNo,
-                score: subjectResults.totalScore,
+	                course: finalCourse,
+	                age: finalAge,
+	                roomNo: finalRoomNo,
+	                score: subjectResults.totalScore,
                 totalScore: subjectResults.totalScore,
                 totalQuestions: subjectResults.totalQuestions,
                 percentage: subjectResults.overallPercentage,
@@ -3910,6 +4203,14 @@ router.post('/scans/process', async (req, res) => {
             const percentage = scoringIncomplete ? 0 : (score / qCount) * 100;
             const status = scoringIncomplete ? 'INCOMPLETE' : (percentage >= 75 ? 'PASS' : 'FAIL');
             const responseMetadata = buildScanResponseMetadata(omrResult, omrResult.scoringStatus);
+            const subjectResults = buildSingleSubjectResultsFromOverall({
+                quizSummary,
+                score,
+                totalQuestions: qCount,
+                percentage,
+                status
+            });
+            const singleSubjectKey = Object.keys(subjectResults).find((key) => !['totalScore', 'totalQuestions', 'overallPercentage', 'overallStatus', 'scoringStatus'].includes(key)) || 'EXAM';
 
             // Identify subject if possible
             let subjectInfo = null;
@@ -3925,7 +4226,8 @@ router.post('/scans/process', async (req, res) => {
             const scanColumns = [
                 'student_id', 'student_name', 'quiz_id', 'answers',
                 'score', 'total_score', 'total_questions', 'percentage', 'status',
-                'photo', 'image_path', 'thumbnail_path', 'course', 'room_no', 'seat_no',
+	                'photo', 'image_path', 'thumbnail_path', 'course', 'room_no', 'seat_no',
+                'score_breakdown', 'subject_scores',
                 'entry_type', 'special_equity_group', 'proctor_status'
             ];
             
@@ -3954,7 +4256,9 @@ router.post('/scans/process', async (req, res) => {
                 JSON.stringify(omrResult.answers),
                 score, score, qCount, percentage, status,
                 photo || null, imageData?.imagePath || null, imageData?.thumbnailPath || null,
-                finalCourse, finalRoomNo, finalSeatNo,
+	                finalCourse, finalRoomNo, null,
+                JSON.stringify({ [singleSubjectKey]: score }),
+                JSON.stringify(subjectResults),
                 finalEntryType,
                 finalEquityGroup,
                 omrResult.proctorStatus || 'Not Verified'
@@ -3973,26 +4277,17 @@ router.post('/scans/process', async (req, res) => {
                 scanValues
             );
 
-            // Also insert into subject_records for reporting
-            if (subjectInfo) {
-                await database.run(
-                    `INSERT INTO subject_records (student_id, student_name, subject_id, 
-                     subject_code, subject_name, score, total_questions, percentage, status, scan_id,
-                     entry_type, residency_type, special_equity_group, room_no, seat_no, exam_date_time) 
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                    [
-                        studentId || 'N/A', finalStudentName, subjectInfo.id, subjectInfo.code, 
-                        subjectInfo.name, score, qCount, percentage.toFixed(1), 
-                        status, scanResult.id,
-                        finalEntryType,
-                        finalResidencyType,
-                        finalEquityGroup,
-                        finalRoomNo,
-                        finalSeatNo,
-                        barcodeData.dateTime || null
-                    ]
-                );
-            }
+            await saveSubjectRecordsForScan({
+                scanId: scanResult.id,
+                studentId: studentId || 'N/A',
+                studentName: finalStudentName,
+                subjectResults,
+                entryType: finalEntryType,
+                residencyType: finalResidencyType,
+                equityGroup: finalEquityGroup,
+                roomNo: finalRoomNo,
+                examDateTime: barcodeData.dateTime || null
+            });
 
             const recordId = await createAutomaticRecord({
                 studentId: finalStudentId,
@@ -4007,11 +4302,10 @@ router.post('/scans/process', async (req, res) => {
                 equityGroup: finalEquityGroup,
                 subject: finalSubject,
                 section: finalSection,
-                course: finalCourse,
-                age: finalAge,
-                roomNo: finalRoomNo,
-                seatNo: finalSeatNo,
-                answers: omrResult.answers,
+	                course: finalCourse,
+	                age: finalAge,
+	                roomNo: finalRoomNo,
+	                answers: omrResult.answers,
                 rawText: '',
                 imagePath: imageData?.imagePath,
                 reviewStatus: responseMetadata.reviewStatus || ((omrResult.overallConfidence || 0) >= 0.55 ? 'auto_scanned' : 'needs_review')
@@ -4024,14 +4318,14 @@ router.post('/scans/process', async (req, res) => {
                 recordId,
                 studentId: studentId,
                 studentName: finalStudentName,
-                course: finalCourse,
-                age: finalAge,
-                roomNo: finalRoomNo,
-                seatNo: finalSeatNo,
-                score: score,
+	                course: finalCourse,
+	                age: finalAge,
+	                roomNo: finalRoomNo,
+	                score: score,
                 totalQuestions: qCount,
                 percentage: percentage.toFixed(1),
                 status: status,
+                subjectScores: subjectResults,
                 answers: omrResult.answers,
                 ocrEngine: 'omr_only',
                 omrEngineUsed: omrResult.omrEngineUsed || 'generated-layout',
@@ -4074,7 +4368,7 @@ router.post('/scans/process', async (req, res) => {
 // Enhanced scan processing for 5 subjects
 router.post('/scans', async (req, res) => {
     try {
-        const { studentId, studentName, answers, quizId, photo, department, course, age, roomNo, seatNo, entryType, specialEquityGroup } = req.body;
+        const { studentId, studentName, answers, quizId, photo, department, course, age, roomNo, entryType, specialEquityGroup } = req.body;
         const answersArr = Array.isArray(answers) ? answers : [];
         
         // Process image if provided
@@ -4085,10 +4379,10 @@ router.post('/scans', async (req, res) => {
             
             // Also add to received_papers so it appears in the web system queue
             try {
-                const queuedPaper = await database.run(
-                    'INSERT INTO received_papers (student_name, course, image_path, sender_ip, device_id, room_no, seat_no) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                    [studentName || 'Android Scan', course || null, imageData.imagePath, req.ip || '0.0.0.0', studentId || null, roomNo || null, seatNo || null]
-                );
+	                const queuedPaper = await database.run(
+	                    'INSERT INTO received_papers (student_name, course, image_path, sender_ip, device_id, room_no, seat_no) VALUES (?, ?, ?, ?, ?, ?, ?)',
+	                    [studentName || 'Android Scan', course || null, imageData.imagePath, req.ip || '0.0.0.0', studentId || null, roomNo || null, null]
+	                );
                 queuedPaperId = queuedPaper.id;
             } catch (recvErr) {
                 console.warn('Failed to add to received_papers queue:', recvErr.message);
@@ -4096,11 +4390,16 @@ router.post('/scans', async (req, res) => {
         }
 
         // Calculate subject scores
-        const subjectResults = await calculateSubjectScores(answersArr);
+        const subjectResults = await calculateSubjectScores(answersArr, quizId);
         const quizSummary = await getQuizSummary(quizId);
         
         // Terminology: PASS/FAIL for overall status
         const status = subjectResults.overallPercentage >= 75 ? 'PASS' : 'FAIL';
+        const legacyEng = getSubjectScoreEntry(subjectResults, 'ENG');
+        const legacySci = getSubjectScoreEntry(subjectResults, 'SCI');
+        const legacyMath = getSubjectScoreEntry(subjectResults, 'MATH');
+        const legacyGen = getSubjectScoreEntry(subjectResults, 'GEN');
+        const legacyAbs = getSubjectScoreEntry(subjectResults, 'ABS');
 
         // Save to scans table
         const scanColumns = [
@@ -4117,28 +4416,16 @@ router.post('/scans', async (req, res) => {
             subjectResults.totalScore, subjectResults.totalScore, subjectResults.totalQuestions,
             subjectResults.overallPercentage, subjectResults.overallPercentage,
             status, status,
-            subjectResults.ENG.score, subjectResults.SCI.score, subjectResults.MATH.score,
-            subjectResults.GEN.score, subjectResults.ABS.score,
-            subjectResults.ENG.percentage, subjectResults.SCI.percentage, subjectResults.MATH.percentage,
-            subjectResults.GEN.percentage, subjectResults.ABS.percentage,
-            subjectResults.ENG.status, subjectResults.SCI.status, subjectResults.MATH.status,
-            subjectResults.GEN.status, subjectResults.ABS.status,
-            photo || null, imageData?.imagePath || null, imageData?.thumbnailPath || null,
-            department || null, course || null, roomNo || null, seatNo || null,
-            JSON.stringify({
-                ENG: subjectResults.ENG.score,
-                SCI: subjectResults.SCI.score,
-                MATH: subjectResults.MATH.score,
-                GEN: subjectResults.GEN.score,
-                ABS: subjectResults.ABS.score
-            }),
-            JSON.stringify({
-                ENG: subjectResults.ENG,
-                SCI: subjectResults.SCI,
-                MATH: subjectResults.MATH,
-                GEN: subjectResults.GEN,
-                ABS: subjectResults.ABS
-            }),
+            legacyEng.score, legacySci.score, legacyMath.score,
+            legacyGen.score, legacyAbs.score,
+            legacyEng.percentage, legacySci.percentage, legacyMath.percentage,
+            legacyGen.percentage, legacyAbs.percentage,
+            legacyEng.status, legacySci.status, legacyMath.status,
+	            legacyGen.status, legacyAbs.status,
+	            photo || null, imageData?.imagePath || null, imageData?.thumbnailPath || null,
+	            department || null, course || null, roomNo || null, null,
+            JSON.stringify(Object.fromEntries(Object.entries(subjectResults).filter(([key]) => !['totalScore', 'totalQuestions', 'overallPercentage', 'overallStatus', 'scoringStatus'].includes(key)).map(([key, value]) => [key, value?.score || 0]))),
+            JSON.stringify(subjectResults),
             entryType || null,
             specialEquityGroup || null
         ];
@@ -4147,28 +4434,17 @@ router.post('/scans', async (req, res) => {
             scanValues
         );
 
-        // Save individual subject records
-        const subjectsList = ['ENG', 'SCI', 'MATH', 'GEN', 'ABS'];
-        for (const subCode of subjectsList) {
-            const subjectInfo = await getSubjectInfo(subCode);
-            const res = subjectResults[subCode];
-            
-            await database.run(
-                `INSERT INTO subject_records (student_id, student_name, subject_id, 
-                 subject_code, subject_name, score, total_questions, percentage, status, scan_id,
-                 entry_type, special_equity_group, room_no, seat_no) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [
-                    studentId || 'N/A', studentName || 'Anonymous', subjectInfo.id, subjectInfo.code, 
-                    subjectInfo.name, res.score, 20, res.percentage, 
-                    res.percentage >= 75 ? 'PASS' : 'FAIL', scanResult.id,
-                    entryType || null, 
-                    specialEquityGroup || null,
-                    roomNo || null,
-                    seatNo || null
-                ]
-            );
-        }
+        await saveSubjectRecordsForScan({
+            scanId: scanResult.id,
+            studentId: studentId || 'N/A',
+            studentName: studentName || 'Anonymous',
+            subjectResults,
+            entryType,
+            residencyType: null,
+            equityGroup: specialEquityGroup,
+            roomNo,
+            examDateTime: null
+        });
 
         const recordId = await createAutomaticRecord({
             studentId: studentId || 'N/A',
@@ -4185,7 +4461,6 @@ router.post('/scans', async (req, res) => {
             course,
             age,
             roomNo,
-            seatNo,
             answers: answersArr,
             imagePath: imageData?.imagePath || normalizeStoredImagePath(photo),
             reviewStatus: 'auto_scanned'
@@ -4751,6 +5026,24 @@ router.post('/omr/layouts', authenticateToken, async (req, res) => {
         if (!fs.existsSync(runtimePaths.omrLayoutsDir)) {
             fs.mkdirSync(runtimePaths.omrLayoutsDir, { recursive: true });
         }
+        // Preserve historical V1/V2 layouts: a new generation must use a fresh
+        // examId rather than overwriting a stored layout that resolves to a
+        // different (older) layout version. Existing physical sheets keep their
+        // original stored geometry this way.
+        if (fs.existsSync(layoutPath)) {
+            let storedVersion = null;
+            try {
+                storedVersion = String(JSON.parse(fs.readFileSync(layoutPath, 'utf8')).layoutVersion || 'generated-layout-v1');
+            } catch (_error) {
+                storedVersion = null;
+            }
+            if (storedVersion && storedVersion !== layout.layoutVersion) {
+                return res.status(409).json({
+                    success: false,
+                    error: `Refusing to overwrite stored layout for examId=${layout.examId} (version ${storedVersion}) with a different version (${layout.layoutVersion}). Regenerate the sheet to obtain a fresh examId so historical layouts remain valid.`
+                });
+            }
+        }
         console.log(`[OMR Layout] saved path=${layoutPath}`);
         fs.writeFileSync(layoutPath, JSON.stringify(layout, null, 2), 'utf8');
         
@@ -4848,7 +5141,6 @@ router.post('/ocr', authenticateToken, async (req, res) => {
             manualAge,
             manualCourse,
             manualRoom,
-            manualSeat,
             manualEntry,
             manualResidency,
             manualEquity
@@ -5003,7 +5295,6 @@ router.post('/ocr', authenticateToken, async (req, res) => {
             );
             const resolvedAge = firstNonEmptyText(manualAge, qrStudentMetadata.age, barcodeData.age);
             const resolvedRoomNo = firstNonEmptyText(manualRoom, qrStudentMetadata.roomNo, barcodeData.roomNo, barcodeData.room_no);
-            const resolvedSeatNo = firstNonEmptyText(manualSeat, qrStudentMetadata.seatNo, barcodeData.seatNo, barcodeData.seat_no);
             const resolvedDateTime = barcodeData.dateTime || barcodeData.date_time || qrStudentMetadata.dateTime || '';
             const topFields = aiResult.topFields || {};
             const topFieldValue = (fieldName) => {
@@ -5087,7 +5378,6 @@ router.post('/ocr', authenticateToken, async (req, res) => {
                 course: resolvedCourse,
                 age: resolvedAge,
                 roomNo: resolvedRoomNo,
-                seatNo: resolvedSeatNo,
                 dateTime: resolvedDateTime,
                 sex: resolvedSex,
                 entryType: resolvedEntryType,
@@ -5222,7 +5512,6 @@ router.post('/ocr', authenticateToken, async (req, res) => {
         let course = '';
         let age = '';
         let roomNo = '';
-        let seatNo = '';
         const fieldConfidence = {};
         const fieldDebug = null;
         const ocrDebugImagePath = null;
@@ -5231,7 +5520,7 @@ router.post('/ocr', authenticateToken, async (req, res) => {
 
         if (sourceReceivedPaperId) {
             const papers = await database.query(
-                'SELECT student_name, course, age, room_no, seat_no, entry_type, equity_group, image_path FROM received_papers WHERE id = ?',
+                'SELECT student_name, course, age, room_no, entry_type, equity_group, image_path FROM received_papers WHERE id = ?',
                 [sourceReceivedPaperId]
             );
             const paper = papers[0];
@@ -5240,7 +5529,6 @@ router.post('/ocr', authenticateToken, async (req, res) => {
                 course = cleanExtractedField(paper.course || '', 'course') || course;
                 age = age || (paper.age != null ? String(paper.age) : '');
                 roomNo = roomNo || String(paper.room_no || '').trim();
-                seatNo = seatNo || String(paper.seat_no || '').trim();
             }
         }
 
@@ -5265,7 +5553,6 @@ router.post('/ocr', authenticateToken, async (req, res) => {
         );
         const resolvedAge = firstNonEmptyText(manualAge, age, qrStudentMetadata.age, barcodeData.age);
         const resolvedRoomNo = firstNonEmptyText(manualRoom, roomNo, qrStudentMetadata.roomNo, barcodeData.roomNo, barcodeData.room_no);
-        const resolvedSeatNo = firstNonEmptyText(manualSeat, seatNo, qrStudentMetadata.seatNo, barcodeData.seatNo, barcodeData.seat_no);
         // Entry/Equity must come from OMR bubbles (or explicit manual override), not QR/OCR text.
         const resolvedEntryType = manualEntry || omrResult.entryType || '';
         const resolvedResidencyType = manualResidency || omrResult.residencyType || '';
@@ -5312,7 +5599,6 @@ router.post('/ocr', authenticateToken, async (req, res) => {
             course: resolvedCourse,
             age: resolvedAge,
             roomNo: resolvedRoomNo,
-            seatNo: resolvedSeatNo,
             dateTime: resolvedDateTime,
             entryType: resolvedEntryType,
             residencyType: resolvedResidencyType,
@@ -5593,7 +5879,6 @@ router.post('/received-papers', async (req, res) => {
         const course = body.course || body.course_name || body.courseName || body.section || body.program;
         const age = body.age;
         const room_no = body.room_no || body.roomNo || body.room;
-        const seat_no = body.seat_no || body.seatNo || body.seat;
         const entry_type = body.entry_type || body.entryType;
         const equity_group = body.equity_group || body.equityGroup;
         const device_id = body.device_id || body.deviceId || body.android_id || body.androidId;
@@ -5689,7 +5974,7 @@ router.post('/received-papers', async (req, res) => {
 
         const result = await database.run(
             'INSERT INTO received_papers (sheet_id, student_id, exam_id, student_name, course, age, room_no, seat_no, entry_type, equity_group, image_file_name, image_path, sender_ip, device_id, image_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [sheet_id || null, student_id || null, exam_id || null, safeStudentName, safeCourse, age || null, room_no || null, seat_no || null, entry_type || null, equity_group || null, filename, relativePath, sender_ip, device_id || null, imageHash]
+            [sheet_id || null, student_id || null, exam_id || null, safeStudentName, safeCourse, age || null, room_no || null, null, entry_type || null, equity_group || null, filename, relativePath, sender_ip, device_id || null, imageHash]
         );
 
         res.json({ 
@@ -5702,8 +5987,7 @@ router.post('/received-papers', async (req, res) => {
             image_path: relativePath,
             student_name: safeStudentName,
             course: safeCourse,
-            room_no: room_no,
-            seat_no: seat_no
+            room_no: room_no
         });
     } catch (error) {
         console.error('Error processing received paper:', error);
@@ -5787,38 +6071,70 @@ router.post('/system/backup/restore-history', authenticateToken, async (req, res
  // Admin endpoint: backfill subject scores for scans with missing data
 router.post('/admin/backfill-subject-scores', authenticateToken, async (req, res) => {
     try {
-        // Find scans where any subject percentage is zero or null (and answers exist)
         const scans = await database.query(`
-            SELECT id, quiz_id, answers
+            SELECT id, student_id, student_name, quiz_id, answers, entry_type, residency_type,
+                   special_equity_group, room_no, exam_date_time, subject_scores,
+                   score, total_questions, percentage, status, overall_status
             FROM scans
-            WHERE (english_percentage = 0 OR english_percentage IS NULL)
-               OR (science_percentage = 0 OR science_percentage IS NULL)
-               OR (math_percentage = 0 OR math_percentage IS NULL)
-               OR (general_percentage = 0 OR general_percentage IS NULL)
-               OR (abstract_percentage = 0 OR abstract_percentage IS NULL)
+            WHERE answers IS NOT NULL
+              AND (subject_scores IS NULL OR TRIM(subject_scores) = '')
         `);
         let updated = 0;
         for (const scan of scans) {
-            const answers = JSON.parse(scan.answers || '[]');
-            // Compute subject results using existing function
-            const subjectResults = await calculateSubjectScores(answers, scan.quiz_id);
-            // Update the database with computed values
+            let answers = [];
+            try {
+                const parsed = JSON.parse(scan.answers || '[]');
+                answers = Array.isArray(parsed) ? parsed : [];
+            } catch (_error) {
+                answers = [];
+            }
+            if (!answers.length) continue;
+            const quizSummary = await getQuizSummary(scan.quiz_id);
+            const subjectResults = quizSummary.format === 'normal'
+                ? buildSingleSubjectResultsFromOverall({
+                    quizSummary,
+                    score: scan.score,
+                    totalQuestions: scan.total_questions || answers.length || 100,
+                    percentage: scan.percentage,
+                    status: scan.overall_status || scan.status
+                })
+                : await calculateSubjectScores(answers, scan.quiz_id);
+            const legacyEng = getSubjectScoreEntry(subjectResults, 'ENG');
+            const legacySci = getSubjectScoreEntry(subjectResults, 'SCI');
+            const legacyMath = getSubjectScoreEntry(subjectResults, 'MATH');
+            const legacyGen = getSubjectScoreEntry(subjectResults, 'GEN');
+            const legacyAbs = getSubjectScoreEntry(subjectResults, 'ABS');
             await database.run(`
                 UPDATE scans
                 SET english_score = ?, english_percentage = ?, english_status = ?,
                     science_score = ?, science_percentage = ?, science_status = ?,
                     math_score = ?, math_percentage = ?, math_status = ?,
                     general_score = ?, general_percentage = ?, general_status = ?,
-                    abstract_score = ?, abstract_percentage = ?, abstract_status = ?
+                    abstract_score = ?, abstract_percentage = ?, abstract_status = ?,
+                    score_breakdown = ?, subject_scores = ?
                 WHERE id = ?
             `, [
-                subjectResults.ENG.score, subjectResults.ENG.percentage, subjectResults.ENG.status,
-                subjectResults.SCI.score, subjectResults.SCI.percentage, subjectResults.SCI.status,
-                subjectResults.MATH.score, subjectResults.MATH.percentage, subjectResults.MATH.status,
-                subjectResults.GEN.score, subjectResults.GEN.percentage, subjectResults.GEN.status,
-                subjectResults.ABS.score, subjectResults.ABS.percentage, subjectResults.ABS.status,
+                legacyEng.score, legacyEng.percentage, legacyEng.status,
+                legacySci.score, legacySci.percentage, legacySci.status,
+                legacyMath.score, legacyMath.percentage, legacyMath.status,
+                legacyGen.score, legacyGen.percentage, legacyGen.status,
+                legacyAbs.score, legacyAbs.percentage, legacyAbs.status,
+                JSON.stringify(Object.fromEntries(Object.entries(subjectResults).filter(([key]) => !['totalScore', 'totalQuestions', 'overallPercentage', 'overallStatus', 'scoringStatus'].includes(key)).map(([key, value]) => [key, value?.score || 0]))),
+                JSON.stringify(subjectResults),
                 scan.id
             ]);
+            await database.run('DELETE FROM subject_records WHERE scan_id = ?', [scan.id]);
+            await saveSubjectRecordsForScan({
+                scanId: scan.id,
+                studentId: scan.student_id || 'N/A',
+                studentName: scan.student_name || 'Anonymous',
+                subjectResults,
+                entryType: scan.entry_type || null,
+                residencyType: scan.residency_type || null,
+                equityGroup: scan.special_equity_group || null,
+                roomNo: scan.room_no || null,
+                examDateTime: scan.exam_date_time || null
+            });
             updated++;
         }
         res.json({ success: true, updated, message: `${updated} scans updated with subject scores` });

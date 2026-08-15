@@ -325,6 +325,12 @@ select_node_runtime() {
 
 # ---- Python environment ----
 setup_python_env() {
+    if [ -d "${VENV_DIR}" ] && [ ! -x "${VENV_DIR}/bin/python" ]; then
+        echo "[ScanCheck] Existing Python virtual environment is invalid or from another OS. Recreating..."
+        rm -rf "${VENV_DIR}"
+        rm -f "${RUNTIME_DIR}/.python_bootstrap_done"
+    fi
+
     if [ ! -d "${VENV_DIR}" ]; then
         echo "[ScanCheck] Creating Python virtual environment..."
         python -m venv "${VENV_DIR}"

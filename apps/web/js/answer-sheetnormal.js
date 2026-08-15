@@ -2,6 +2,7 @@
 class NormalAnswerSheetGenerator {
     constructor() {
         this.PAPER_SIZES = {
+            'a4': { width: '210mm', height: '297mm', label: 'A4 (210×297mm)' },
             'long-bond': { width: '8.5in', height: '13in', label: 'Long Bond (8.5×13)' },
             '11x14-bond': { width: '11in', height: '14in', label: '11×14 Bond' },
         };
@@ -14,7 +15,7 @@ class NormalAnswerSheetGenerator {
             title: 'Entrance Examination',
             courseLogo: null,
             courseName: null,
-            paperSize: 'long-bond'
+            paperSize: 'a4'
         };
     }
 
@@ -39,6 +40,9 @@ class NormalAnswerSheetGenerator {
 
         const finalConfig = { ...this.defaultConfig, ...config };
         finalConfig.deptColor = '#000000';
+        // All ScanCheck answer sheets use one physical page standard so the
+        // generated layout coordinates remain comparable across exam formats.
+        finalConfig.paperSize = 'a4';
 
         if (config.questionCount != null && !config.questions) {
             finalConfig.questions = config.questionCount;
@@ -54,29 +58,85 @@ class NormalAnswerSheetGenerator {
             finalConfig.columns = 2;
         }
 
+        // Every newly generated sheet gets a fresh, unique exam id so that
+        // regenerating a quiz never overwrites previously stored V1/V2 layouts.
+        if (!finalConfig.examId && !finalConfig.studentData?.examId) {
+            finalConfig.examId = this.createFreshExamId();
+        }
+
         sheet.innerHTML = this.createSheetHTML(finalConfig);
         this.saveRenderedLayout(sheet, finalConfig);
     }
 
+    createFreshExamId() {
+        const rand = Math.random().toString(36).toUpperCase().slice(2, 6);
+        return `EX${Date.now().toString(36).toUpperCase().slice(-5)}${rand}`;
+    }
+
+    compactCourseForQr(course) {
+        const text = String(course || '').trim();
+        const key = text.toUpperCase().replace(/[^A-Z]/g, ' ');
+        const compactMap = [
+            [/BACHELOR\s+OF\s+SCIENCE\s+IN\s+INFORMATION\s+TECHNOLOGY|^BSIT$/, 'BSIT'],
+            [/BACHELOR\s+OF\s+SCIENCE\s+IN\s+HOSPITALITY\s+MANAGEMENT|^BSHM$/, 'BSHM'],
+            [/BACHELOR\s+OF\s+SCIENCE\s+IN\s+BUSINESS\s+ADMINISTRATION|^BSBA$/, 'BSBA'],
+            [/BACHELOR\s+OF\s+SCIENCE\s+IN\s+CRIMINOLOGY|^BSCRIM$/, 'BSCRIM'],
+            [/BACHELOR\s+OF\s+ELEMENTARY\s+EDUCATION|^BEED$/, 'BEED'],
+            [/BACHELOR\s+OF\s+SECONDARY\s+EDUCATION|^BSED$/, 'BSED']
+        ];
+        const match = compactMap.find(([pattern]) => pattern.test(key));
+        return match ? match[1] : text;
+    }
+
+    compactDateTimeForQr(dateTime) {
+        const text = String(dateTime || '').trim();
+        if (!text) return '';
+        const parsed = new Date(text);
+        if (Number.isNaN(parsed.getTime())) return text;
+        const pad = value => String(value).padStart(2, '0');
+        return [
+            parsed.getFullYear(),
+            pad(parsed.getMonth() + 1),
+            pad(parsed.getDate()),
+            pad(parsed.getHours()),
+            pad(parsed.getMinutes())
+        ].join('');
+    }
+
+    createCompactQrPayload(config, examId) {
+        const studentData = config.studentData || {};
+        const payload = {
+            v: 2,
+            e: String(examId || '').trim(),
+            s: String(studentData.sheetId || '').trim(),
+            n: String(studentData.studentName || '').trim(),
+            c: this.compactCourseForQr(studentData.course),
+            a: String(studentData.age || '').trim(),
+            r: String(studentData.roomNo || '').trim(),
+            t: this.compactDateTimeForQr(studentData.dateTime)
+        };
+        return Object.fromEntries(Object.entries(payload).filter(([key, value]) => key === 'v' || String(value || '').trim()));
+    }
+
     getPaperSize(config) {
-        const key = config.paperSize || 'long-bond';
-        return this.PAPER_SIZES[key] || this.PAPER_SIZES['long-bond'];
+        const key = config.paperSize || 'a4';
+        return this.PAPER_SIZES[key] || this.PAPER_SIZES['a4'];
     }
 
     createSheetHTML(config) {
         const paper = this.getPaperSize(config);
         return `
-            <div class="answer-sheet" data-layout-sheet="1" data-paper-size="${config.paperSize || 'long-bond'}" style="width: ${paper.width}; min-width: ${paper.width}; max-width: ${paper.width}; height: ${paper.height}; min-height: ${paper.height}; max-height: ${paper.height}; background: #fff; padding: 0.25in 0.50in 0.25in 0.3in; box-sizing: border-box; display: flex; flex-direction: column; position: relative; overflow: hidden; border: 4px solid ${config.deptColor};">
+            <div class="answer-sheet" data-layout-sheet="1" data-paper-size="a4" style="width: ${paper.width}; min-width: ${paper.width}; max-width: ${paper.width}; height: ${paper.height}; min-height: ${paper.height}; max-height: ${paper.height}; background: #fff; padding: 0.35in 0.42in; box-sizing: border-box; display: flex; flex-direction: column; position: relative; overflow: hidden; border: 4px solid ${config.deptColor};">
                 ${this.createRegistrationAnchors(config.deptColor)}
-                ${this.createDensityReferenceBar(config.deptColor)}
-                <div class="sheet-inner-wrap" style="width: 100%; height: 100%; display: flex; flex-direction: column; margin-right: 0.38in; max-width: calc(100% - 0.38in); box-sizing: border-box;">
+                <div class="sheet-inner-wrap" style="width: 100%; height: 100%; display: flex; flex-direction: column; box-sizing: border-box;">
                     ${this.createHeader(config)}
                     
-                    <div class="answer-sheet-top" style="display: flex; gap: 0.15in; align-items: stretch; margin-bottom: 0.08in; flex-shrink: 0;">
+                    <div class="answer-sheet-top" style="display: flex; gap: 0.2in; align-items: stretch; margin-bottom: 0.1in; flex-shrink: 0;">
                         ${config.showStudentInfo ? this.createStudentInfo(config) : ''}
                     </div>
 
-                    <div class="answer-sheet-questions-wrap" style="flex: 1; display: flex; flex-direction: column; min-height: 0; margin-bottom: 0.03in;">
+                    <div class="answer-sheet-questions-wrap" style="flex: 1; display: flex; flex-direction: column; min-height: 0; margin-bottom: 0.1in; justify-content: space-between;">
+                        ${this.createSubjectHeader(config)}
                         ${this.createQuestionsGrid(config)}
                     </div>
 
@@ -106,9 +166,9 @@ class NormalAnswerSheetGenerator {
                 flex: 0 0 auto;
             ">
                 <div data-layout-region="qr" style="
-                    width: 1.66in;
-                    height: 1.66in;
-                    padding: 0.08in;
+                    width: 1.78in;
+                    height: 1.78in;
+                    padding: 0.045in;
                     background: #fff;
                     border: 1.8px solid ${config.deptColor};
                     box-sizing: border-box;
@@ -120,7 +180,7 @@ class NormalAnswerSheetGenerator {
                 </div>
                 ${examId ? `
                     <div style="
-                        font-size: 0.065in;
+                        font-size: 0.07in;
                         font-weight: bold;
                         color: #111;
                         font-family: monospace;
@@ -134,18 +194,9 @@ class NormalAnswerSheetGenerator {
         `;
         
         if (config.studentData) {
-            const qrPayload = {
-                examId: examId,
-                sheetId: String(config.studentData.sheetId || '').trim(),
-                studentName: String(config.studentData.studentName || '').trim(),
-                course: String(config.studentData.course || '').trim(),
-                age: String(config.studentData.age || '').trim(),
-                roomNo: String(config.studentData.roomNo || '').trim(),
-                seatNo: String(config.studentData.seatNo || '').trim(),
-                dateTime: String(config.studentData.dateTime || '').trim()
-            };
+            const qrPayload = this.createCompactQrPayload(config, examId);
             const qrValue = encodeURIComponent(JSON.stringify(qrPayload));
-            const qrEndpoint = `/api/qr?size=900&margin=6&ecc=H&data=${qrValue}`;
+            const qrEndpoint = `/api/qr?size=900&margin=2&ecc=H&data=${qrValue}`;
             const qrSrc = window.scanCheckConfig ? window.scanCheckConfig.resolveUrl(qrEndpoint) : qrEndpoint;
             qrWrapper = `
                 <div style="
@@ -157,9 +208,9 @@ class NormalAnswerSheetGenerator {
                     flex: 0 0 auto;
                 ">
                     <div data-layout-region="qr" style="
-                        width: 1.66in;
-                        height: 1.66in;
-                        padding: 0.08in;
+                        width: 1.78in;
+                        height: 1.78in;
+                        padding: 0.045in;
                         background: #fff;
                         border: 1.8px solid ${config.deptColor};
                         box-sizing: border-box;
@@ -177,7 +228,7 @@ class NormalAnswerSheetGenerator {
                     </div>
                     ${examId ? `
                         <div style="
-                            font-size: 0.065in;
+                            font-size: 0.07in;
                             font-weight: bold;
                             color: #111;
                             font-family: monospace;
@@ -194,22 +245,22 @@ class NormalAnswerSheetGenerator {
         return `
             <div style="
                 display: grid;
-                grid-template-columns: 0.9in 1fr 2.7in;
+                grid-template-columns: 0.68in 1fr 2.78in;
                 align-items: center;
-                gap: 0.1in;
-                margin-bottom: 0.15in;
-                padding: 0.08in;
-                min-height: 2.3in;
+                gap: 0.08in;
+                margin-bottom: 0.1in;
+                padding: 0.06in;
+                min-height: 1.62in;
                 background: #fff;
                 border: 3px double ${config.deptColor};
                 border-radius: 8px;
                 box-sizing: border-box;
             ">
-                <div style="display: flex; align-items: center; justify-content: center; width: 0.9in;">
+                <div style="display: flex; align-items: center; justify-content: center; width: 0.68in;">
                     <img src="images/pcc.png" 
                         style="
-                            width: 0.7in;
-                            height: 0.7in;
+                            width: 0.58in;
+                            height: 0.58in;
                             object-fit: contain;
                             display: block;
                             filter: contrast(1.1);
@@ -220,7 +271,7 @@ class NormalAnswerSheetGenerator {
                 <div style="text-align: center; min-width: 0;">
                     <h1 style="
                         margin: 0;
-                        font-size: 0.18in;
+                        font-size: 0.17in;
                         letter-spacing: 1.2px;
                         text-transform: uppercase;
                         font-weight: 900;
@@ -228,17 +279,17 @@ class NormalAnswerSheetGenerator {
                         line-height: 1.2;
                         word-break: keep-all;
                     ">PASSI CITY COLLEGE</h1>
-                    <div style="font-size: 0.095in; margin-bottom: 3px; font-weight: 600; color: #444;">City of Passi, Iloilo</div>
+                    <div style="font-size: 0.09in; margin-bottom: 2px; font-weight: 600; color: #444;">City of Passi, Iloilo</div>
                     
                     <div style="
                         border-top: 1.5px solid ${config.deptColor};
-                        margin: 0.035in auto;
+                        margin: 0.025in auto;
                         width: 85%;
                     "></div>
                     
                     <h2 style="
-                        margin: 3px auto;
-                        font-size: 0.12in;
+                        margin: 2px auto;
+                        font-size: 0.11in;
                         font-weight: 800;
                         color: #000;
                         text-transform: uppercase;
@@ -246,28 +297,6 @@ class NormalAnswerSheetGenerator {
                         word-break: keep-all;
                     ">${title}</h2>
                     
-                    <div style="
-                        margin-top: 0.05in;
-                        padding: 0.03in 0.08in;
-                        border: 1.5px solid ${config.deptColor};
-                        background-color: #f8fafc;
-                        border-radius: 4px;
-                        display: inline-block;
-                    ">
-                        <div data-export-warning="1" style="
-                            display: block;
-                            font-size: 0.075in;
-                            line-height: 1.2;
-                            color: #d32f2f;
-                            font-weight: 900;
-                            text-transform: uppercase;
-                            letter-spacing: 0.4px;
-                            font-family: Arial, sans-serif;
-                            white-space: normal;
-                        ">
-                            WARNING: Any Form of Cheating will result in immediate disqualification
-                        </div>
-                    </div>
                 </div>
                 
                 <div style="
@@ -275,16 +304,16 @@ class NormalAnswerSheetGenerator {
                     flex-direction: row;
                     align-items: center;
                     justify-content: flex-end;
-                    gap: 0.12in;
-                    width: 2.7in;
-                    min-width: 2.7in;
+                    gap: 0.08in;
+                    width: 2.78in;
+                    min-width: 2.78in;
                     flex-shrink: 0;
                     white-space: nowrap;
                 ">
                     <img src="${rightLogoSrc}" 
                         style="
-                            width: 0.7in;
-                            height: 0.7in;
+                            width: 0.45in;
+                            height: 0.45in;
                             object-fit: contain;
                             display: block;
                             flex: 0 0 auto;
@@ -309,18 +338,14 @@ class NormalAnswerSheetGenerator {
             '-webkit-print-color-adjust:exact',
             'print-color-adjust:exact'
         ].join(';');
-        const inset = '0.1in';
+        const inset = '0.12in';
         const half = '50%';
         const anchors = [
             ['top-left', `left:${inset};top:${inset};`],
             ['top-mid', `left:calc(${half} - 0.09in);top:${inset};`],
             ['top-right', `right:${inset};top:${inset};`],
-            ['left-mid-top', `left:${inset};top:calc(33.33% - 0.09in);`],
-            ['right-mid-top', `right:${inset};top:calc(33.33% - 0.09in);`],
             ['left-mid', `left:${inset};top:calc(${half} - 0.09in);`],
             ['right-mid', `right:${inset};top:calc(${half} - 0.09in);`],
-            ['left-mid-bot', `left:${inset};top:calc(66.66% - 0.09in);`],
-            ['right-mid-bot', `right:${inset};top:calc(66.66% - 0.09in);`],
             ['bottom-left', `left:${inset};bottom:${inset};`],
             ['bottom-mid', `left:calc(${half} - 0.09in);bottom:${inset};`],
             ['bottom-right', `right:${inset};bottom:${inset};`]
@@ -330,22 +355,6 @@ class NormalAnswerSheetGenerator {
             .join('');
     }
 
-    createDensityReferenceBar(color = '#000000') {
-        const barStyle = [
-            'position:absolute',
-            'width:0.06in',
-            `height:calc(100% - 0.6in)`,
-            `top:0.3in`,
-            `right:0.62in`,
-            `background:${color} !important`,
-            'display:block',
-            'z-index:499',
-            'pointer-events:none',
-            '-webkit-print-color-adjust:exact',
-            'print-color-adjust:exact'
-        ].join(';');
-        return `<div data-layout-density-ref="right-edge" aria-hidden="true" style="${barStyle}"></div>`;
-    }
 
     createStudentInfo(config) {
         const color = config.deptColor;
@@ -368,11 +377,9 @@ class NormalAnswerSheetGenerator {
             return `${month} ${day}, ${year} ${hour}:${minute}`;
         };
         const answerSheetId = v('sheetId') || v('studentId');
-        const labelStyle = `font-size: 0.085in; text-transform: uppercase; letter-spacing: 0.4px; flex-shrink: 0;`;
-        const valueLineStyle = `border-bottom: 2px solid ${color}; flex-grow: 1; min-height: 0.135in; max-height: 0.135in; font-size: 0.075in; font-weight: 800; text-transform: uppercase; padding-left: 0.035in; line-height: 0.135in; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`;
-        const examineeLineStyle = `${valueLineStyle} flex: 0 0 0.5in; text-align: center; padding-left: 0;`;
+        const labelStyle = `font-size: 0.095in; text-transform: uppercase; letter-spacing: 0.25px; flex-shrink: 0;`;
+        const valueLineStyle = `border-bottom: 2px solid ${color}; flex-grow: 1; min-height: 0.15in; max-height: 0.15in; font-size: 0.098in; font-weight: 900; text-transform: uppercase; padding-left: 0.035in; line-height: 0.15in; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`;
         const compactLineStyle = `${valueLineStyle} flex: 0 0 0.3in; text-align: center; padding-left: 0;`;
-        const seatLineStyle = `${valueLineStyle} flex: 0 0 0.38in; text-align: center; padding-left: 0;`;
         const dateLineStyle = `${valueLineStyle} flex: 0 0 1.35in;`;
         
         return `
@@ -384,22 +391,27 @@ class NormalAnswerSheetGenerator {
                             <div data-layout-region="studentName" style="${valueLineStyle}">${fit(v('studentName'), 40)}</div>
                         </div>
 
-                        <div style="display: flex; align-items: flex-end; gap: 0.075in; grid-column: span 2; min-width: 0;">
-                            <div style="display: flex; align-items: flex-end; gap: 0.03in; flex: 0 0 1.45in;">
-                                <strong style="width: 0.85in; ${labelStyle};">Examinee No.:</strong>
-                                <div data-layout-region="examineeNumber" style="${examineeLineStyle}">${fit(answerSheetId, 18)}</div>
+                        <div style="display: flex; align-items: flex-end; gap: 0.05in; grid-column: span 2; min-width: 0;">
+                            <div style="display: flex; align-items: flex-end; gap: 0.02in; flex: 0 0 1.45in;">
+                                <strong style="width: 0.76in; ${labelStyle};">Exam No.:</strong>
+                                <div data-layout-region="examineeNumber" style="${compactLineStyle} flex: 0 0 0.45in;">${fit(answerSheetId, 12)}</div>
                             </div>
-                            <div style="display: flex; align-items: flex-end; gap: 0.03in; flex: 0 0 0.7in;">
-                                <strong style="width: 0.32in; ${labelStyle};">Age:</strong>
-                                <div data-layout-region="age" style="${compactLineStyle}">${fit(v('age'), 4)}</div>
+                            <div style="display: flex; align-items: flex-end; gap: 0.02in; flex: 0 0 0.5in;">
+                                <strong style="width: 0.26in; ${labelStyle};">Age:</strong>
+                                <div data-layout-region="age" style="${compactLineStyle} flex: 0 0 0.22in;">${fit(v('age'), 3)}</div>
                             </div>
-                            <div style="display: flex; align-items: flex-end; gap: 0.03in; flex: 0 0 0.9in;">
-                                <strong style="width: 0.5in; ${labelStyle};">Room No:</strong>
-                                <div data-layout-region="roomNumber" style="${compactLineStyle}">${fit(v('roomNo'), 4)}</div>
+                            <div style="display: flex; align-items: flex-end; gap: 0.02in; flex: 0 0 0.62in;">
+                                <strong style="width: 0.36in; ${labelStyle};">Room:</strong>
+                                <div data-layout-region="roomNumber" style="${compactLineStyle} flex: 0 0 0.26in;">${fit(v('roomNo'), 3)}</div>
                             </div>
-                            <div style="display: flex; align-items: flex-end; gap: 0.03in; flex: 0 0 0.95in;">
-                                <strong style="width: 0.46in; ${labelStyle};">Seat No:</strong>
-                                <div data-layout-region="seatNumber" style="${seatLineStyle}">${fit(v('seatNo'), 4)}</div>
+                            <div style="display: flex; align-items: flex-end; gap: 0.03in; flex: 0 0 0.72in;">
+                                <strong style="width: 0.24in; ${labelStyle};">Sex:</strong>
+                                <span style="display: inline-flex; align-items: center; gap: 0.02in;">
+                                    <span data-layout-group="sex" data-layout-label="M" style="width: 0.14in; height: 0.14in; border: 1.6px solid ${color}; border-radius: 50%; display: inline-block; box-sizing: border-box;"></span>
+                                    <span style="font-size: 0.088in; font-weight: 900; margin-right: 0.03in;">M</span>
+                                    <span data-layout-group="sex" data-layout-label="F" style="width: 0.14in; height: 0.14in; border: 1.6px solid ${color}; border-radius: 50%; display: inline-block; box-sizing: border-box;"></span>
+                                    <span style="font-size: 0.088in; font-weight: 900;">F</span>
+                                </span>
                             </div>
                         </div>
 
@@ -416,49 +428,49 @@ class NormalAnswerSheetGenerator {
                 </div>
 
                 <div style="padding: 0.05in 0.045in; border: 2.5px solid ${color}; border-radius: 4px; background: #fff; display: flex; flex-direction: column; justify-content: flex-start;">
-                    <div style="font-size: 0.08in; font-weight: 900; text-transform: uppercase; border-bottom: 2px solid ${color}; padding-bottom: 1.5px; text-align: center; margin-bottom: 0.04in;">
+                    <div style="font-size: 0.088in; font-weight: 900; text-transform: uppercase; border-bottom: 2px solid ${color}; padding-bottom: 1.5px; text-align: center; margin-bottom: 0.04in;">
                         ENTRY
                     </div>
                     <div style="display: flex; flex-direction: column; gap: 0.035in; padding-left: 0.08in;">
                         <div style="display: flex; align-items: center; gap: 0.07in;">
                             <div data-layout-group="entry" data-layout-label="New Student" style="width: 0.19in; height: 0.19in; border: 2.5px solid ${color}; border-radius: 50%;"></div>
-                            <span style="font-size: 0.078in; font-weight: 700; text-transform: uppercase;">New Student</span>
+                            <span style="font-size: 0.082in; font-weight: 800; text-transform: uppercase;">New Student</span>
                         </div>
                         <div style="display: flex; align-items: center; gap: 0.07in;">
                             <div data-layout-group="entry" data-layout-label="Transferee" style="width: 0.19in; height: 0.19in; border: 2.5px solid ${color}; border-radius: 50%;"></div>
-                            <span style="font-size: 0.078in; font-weight: 700; text-transform: uppercase;">Transferee</span>
+                            <span style="font-size: 0.082in; font-weight: 800; text-transform: uppercase;">Transferee</span>
                         </div>
                         <div style="display: flex; align-items: center; gap: 0.07in;">
                             <div data-layout-group="entry" data-layout-label="Passinhon" style="width: 0.19in; height: 0.19in; border: 2.5px solid ${color}; border-radius: 50%;"></div>
-                            <span style="font-size: 0.078in; font-weight: 700; text-transform: uppercase;">Passinhon</span>
+                            <span style="font-size: 0.082in; font-weight: 800; text-transform: uppercase;">Passinhon</span>
                         </div>
                         <div style="display: flex; align-items: center; gap: 0.07in;">
                             <div data-layout-group="entry" data-layout-label="Non-Passinhon" style="width: 0.19in; height: 0.19in; border: 2.5px solid ${color}; border-radius: 50%;"></div>
-                            <span style="font-size: 0.078in; font-weight: 700; text-transform: uppercase;">Non-Passinhon</span>
+                            <span style="font-size: 0.082in; font-weight: 800; text-transform: uppercase;">Non-Passinhon</span>
                         </div>
                     </div>
                 </div>
 
                 <div style="padding: 0.05in 0.045in; border: 2.5px solid ${color}; border-radius: 4px; background: #fff; display: flex; flex-direction: column; justify-content: flex-start;">
-                    <div style="font-size: 0.08in; font-weight: 900; text-transform: uppercase; border-bottom: 2px solid ${color}; padding-bottom: 1.5px; text-align: center; margin-bottom: 0.04in;">
+                    <div style="font-size: 0.088in; font-weight: 900; text-transform: uppercase; border-bottom: 2px solid ${color}; padding-bottom: 1.5px; text-align: center; margin-bottom: 0.04in;">
                         EQUITY GROUP
                     </div>
                     <div style="display: flex; flex-direction: column; gap: 0.035in; padding-left: 0.08in;">
                         <div style="display: flex; align-items: center; gap: 0.07in;">
                             <div data-layout-group="equity" data-layout-label="PWDs" style="width: 0.19in; height: 0.19in; border: 2.5px solid ${color}; border-radius: 50%;"></div>
-                            <span style="font-size: 0.078in; font-weight: 700; text-transform: uppercase;">PWDs</span>
+                            <span style="font-size: 0.082in; font-weight: 800; text-transform: uppercase;">PWDs</span>
                         </div>
                         <div style="display: flex; align-items: center; gap: 0.07in;">
                             <div data-layout-group="equity" data-layout-label="IPs" style="width: 0.19in; height: 0.19in; border: 2.5px solid ${color}; border-radius: 50%;"></div>
-                            <span style="font-size: 0.078in; font-weight: 700; text-transform: uppercase;">IPs</span>
+                            <span style="font-size: 0.082in; font-weight: 800; text-transform: uppercase;">IPs</span>
                         </div>
                         <div style="display: flex; align-items: center; gap: 0.07in;">
                             <div data-layout-group="equity" data-layout-label="Solo Parent" style="width: 0.19in; height: 0.19in; border: 2.5px solid ${color}; border-radius: 50%;"></div>
-                            <span style="font-size: 0.078in; font-weight: 700; text-transform: uppercase;">Solo Parent</span>
+                            <span style="font-size: 0.082in; font-weight: 800; text-transform: uppercase;">Solo Parent</span>
                         </div>
                         <div style="display: flex; align-items: center; gap: 0.07in;">
                             <div data-layout-group="equity" data-layout-label="Magna Carta" style="width: 0.19in; height: 0.19in; border: 2.5px solid ${color}; border-radius: 50%;"></div>
-                            <span style="font-size: 0.078in; font-weight: 700; text-transform: uppercase;">Magna Carta</span>
+                            <span style="font-size: 0.082in; font-weight: 800; text-transform: uppercase;">Magna Carta</span>
                         </div>
                     </div>
                 </div>
@@ -466,11 +478,35 @@ class NormalAnswerSheetGenerator {
         `;
     }
 
+    createSubjectHeader(config) {
+        const subject = Array.isArray(config.subjectConfig) && config.subjectConfig.length > 0
+            ? config.subjectConfig[0]
+            : (Array.isArray(config.subjects) && config.subjects.length > 0 ? config.subjects[0] : null);
+        const code = String(subject?.code || '').trim().toUpperCase();
+        const name = String(subject?.name || config.title || 'EXAM QUESTIONS').trim().toUpperCase();
+        const label = code ? `${code} - ${name}` : name;
+        return `
+            <div data-layout-subject="ALL" data-layout-subject-name="${label}" style="
+                border: 2px solid #000;
+                border-bottom: 0;
+                border-radius: 6px 6px 0 0;
+                padding: 0.035in 0.08in;
+                font-size: 0.095in;
+                font-weight: 900;
+                text-transform: uppercase;
+                letter-spacing: 0.3px;
+                line-height: 1.1;
+                background: #fff;
+                color: #000;
+            ">${label}</div>
+        `;
+    }
+
     createQuestionsGrid(config) {
         const questionsPerColumn = Math.ceil(config.questions / config.columns);
         const color = config.deptColor;
         
-        let html = `<div data-layout-subject="ALL" data-layout-subject-name="EXAM" class="answer-sheet-q-grid omr-grid" style="display: grid; grid-template-columns: repeat(${config.columns}, 1fr); margin: 0; border: 2.5px solid ${color}; border-radius: 6px; flex: 1; min-height: 0; background: #fff; overflow: hidden;">`;
+        let html = `<div data-layout-subject="ALL" data-layout-subject-name="EXAM" class="answer-sheet-q-grid omr-grid" style="display: grid; grid-template-columns: repeat(${config.columns}, 1fr); margin: 0; border: 2.5px solid ${color}; border-radius: 0 0 6px 6px; flex: 1; min-height: 0; background: #fff; overflow: hidden;">`;
         
         for (let col = 0; col < config.columns; col++) {
             const isLast = col === config.columns - 1;
@@ -503,17 +539,14 @@ class NormalAnswerSheetGenerator {
         for (let i = 0; i < optionsCount; i++) {
             options += `
                 <span style="display: inline-flex; align-items: center; margin: 0; flex: 0 0 auto;">
-                    <span class="bubble" data-layout-choice="${optionLetters[i]}" style="width: 0.14in; height: 0.14in; border: 1.5px solid ${color}; border-radius: 50%; display: inline-block; box-sizing: border-box;"></span>
-                    <span class="bubble-label" style="font-size: 0.08in; font-weight: 900; font-family: Arial, sans-serif; margin-left: 0.025in; color: #000;">${optionLetters[i]}</span>
+                    <span class="bubble" data-layout-choice="${optionLetters[i]}" style="width: 0.2in; height: 0.2in; border: 2px solid ${color}; border-radius: 50%; display: inline-block; box-sizing: border-box;"></span>
+                    <span class="bubble-label" style="font-size: 0.10in; font-weight: 900; font-family: Arial, sans-serif; margin-left: 0.03in; color: #000;">${optionLetters[i]}</span>
                 </span>
             `;
         }
 
-        const timingMark = `<span class="timing-mark" data-layout-timing-row="${questionNumber}" data-layout-timing-side="left" aria-hidden="true" style="display: inline-block; width: 0.19in; height: 0.098in; background: #000 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; margin-right: 0.05in;"></span>`;
-
         return `
             <div class="question-row" data-layout-question="${questionNumber}" style="display: flex; align-items: center; border-bottom: 0.5px solid #bbb; padding: 0; flex: 1 1 0; width: 100%; min-height: 0; box-sizing: border-box;">
-                <div style="display: flex; align-items: center; width: 0.3in; flex-shrink: 0; justify-content: center;">${timingMark}</div>
                 <strong style="font-size: 0.095in; width: 0.3in; text-align: right; margin-right: 0.06in; color: #000; font-family: Arial, sans-serif;">${questionNumber}.</strong>
                 <div style="display: flex; justify-content: space-between; align-items: center; flex: 1; padding: 0 0.08in 0 0.04in; max-width: 100%; box-sizing: border-box; overflow: hidden;">
                     ${options}
@@ -610,9 +643,6 @@ class NormalAnswerSheetGenerator {
             });
         };
         Object.entries(layout.registrationAnchors || {}).forEach(([label, anchor]) => pushPoint('anchor', label, anchor));
-        (layout.timingMarks || []).forEach((mark, index) => {
-            pushPoint('timing', `${mark.row}:${mark.side || 'left'}:${index}`, mark.rect);
-        });
         (layout.subjects || []).forEach((subject) => {
             pushPoint('subject', subject.code || subject.name || '', subject.block);
             (subject.questions || []).forEach((question) => {
@@ -809,26 +839,6 @@ class NormalAnswerSheetGenerator {
             });
             return out;
         };
-        const timingMarks = () => {
-            const out = [];
-            sheet.querySelectorAll('[data-layout-timing-row]').forEach((element) => {
-                const row = Number.parseInt(element.getAttribute('data-layout-timing-row') || '0', 10);
-                const side = element.getAttribute('data-layout-timing-side') || 'left';
-                const rect = this.relativeRect(element, sheetRect, canonicalSize);
-                if (row > 0 && rect) out.push({ row, side, rect });
-            });
-            return out.sort((a, b) => a.row - b.row);
-        };
-        const densityRefs = () => {
-            const out = {};
-            sheet.querySelectorAll('[data-layout-density-ref]').forEach((element) => {
-                const label = element.getAttribute('data-layout-density-ref') || '';
-                const rect = this.relativeRect(element, sheetRect, canonicalSize);
-                if (label && rect) out[label] = rect;
-            });
-            return out;
-        };
-
         const subjects = [];
         sheet.querySelectorAll('[data-layout-subject]').forEach((subjectElement) => {
             const code = subjectElement.getAttribute('data-layout-subject') || '';
@@ -858,11 +868,9 @@ class NormalAnswerSheetGenerator {
             });
         });
         const registrationAnchors = anchors();
-        const timingMarksArray = timingMarks();
-        const densityRefMap = densityRefs();
 
         const layout = {
-            layoutVersion: 'generated-layout-v2-print-canonical',
+            layoutVersion: 'generated-layout-v3-ai-print-canonical',
             examId,
             exam_id: examId,
             sheetId: String(studentData.sheetId || studentData.studentId || '').trim(),
@@ -874,7 +882,7 @@ class NormalAnswerSheetGenerator {
                 height: canonicalSize.height
             },
             scaleReference: {
-                paper: config.paperSize || 'long-bond',
+                paper: 'a4',
                 cssWidth: paperSize.width,
                 cssHeight: paperSize.height,
                 sheetWidth: canonicalSize.width,
@@ -901,10 +909,6 @@ class NormalAnswerSheetGenerator {
             equity_group: group('equity'),
             registrationAnchors,
             registration_anchors: registrationAnchors,
-            timingMarks: timingMarksArray,
-            timing_marks: timingMarksArray,
-            densityRefs: densityRefMap,
-            density_refs: densityRefMap,
             subjects,
             answerKey: config.answerKey || config.correctAnswers || null,
             answerKeyMetadata: this.buildAnswerKeyMetadata(config, normalizedSubjects),

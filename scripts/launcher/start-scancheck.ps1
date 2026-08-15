@@ -15,8 +15,8 @@ $ServerLog = Join-Path $LogDir "launcher_server.log"
 $VenvDir = Join-Path $RootDir ".venv"
 $ApiDir = Join-Path $RootDir "apps\api"
 $NodeRuntimeDir = Join-Path $RuntimeDir "tools\node"
-$NodeCmd = "node"
-$NpmCmd = "npm"
+$NodeCmd = "node.exe"
+$NpmCmd = "npm.cmd"
 $CacheFile = Join-Path $RuntimeDir ".launcher_cache.json"
 
 function Ensure-WindowsFirewallRule {
@@ -49,7 +49,7 @@ function Ensure-WindowsFirewallRule {
             Write-Warning '[ScanCheck] You may need to manually allow ScanCheck in Windows Firewall to access it from other devices on your network.'
         }
     } catch {
-        Write-Warning '[ScanCheck] Could not add Firewall rule: ' + $_
+        Write-Warning (('[ScanCheck] Could not add Firewall rule: ') + $_)
     }
 }
 
@@ -187,7 +187,7 @@ function Reset-BrokenLocalNode {
 }
 
 function Install-LocalNodeLts {
-    $desiredMajor = if ($env:SCANCHECK_NODE_MAJOR) { $env:SCANCHECK_NODE_MAJOR } else { "22" }
+    $desiredMajor = if ($env:SCANCHECK_NODE_MAJOR) { $env:SCANCHECK_NODE_MAJOR } else { "20" }
     $arch = switch ($env:PROCESSOR_ARCHITECTURE) {
         "AMD64" { "x64" }
         "ARM64" { "arm64" }
@@ -258,22 +258,28 @@ function Install-LocalNodeLts {
 
 function Select-NodeRuntime {
     $useSystem = $false
+    $desiredMajor = if ($env:SCANCHECK_NODE_MAJOR) { [string]$env:SCANCHECK_NODE_MAJOR } else { '20' }
     $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
     if ($nodeCommand) {
         if (Test-SupportedNode -NodePath $nodeCommand.Path) {
             $useSystem = $true
         } else {
-            Write-Warning '[ScanCheck] System Node ' + (& $nodeCommand.Path -v) + ' is outside supported range (18-22).'
+            Write-Warning (('[ScanCheck] System Node ') + (& $nodeCommand.Path -v) + ' is outside supported range (18-22).')
         }
     }
 
     if ($useSystem) {
-        $script:NodeCmd = "node"
-        $script:NpmCmd = "npm"
+        $script:NodeCmd = $nodeCommand.Source
+        $npmCommand = Get-Command npm.cmd -ErrorAction SilentlyContinue
+        if (-not $npmCommand) {
+            throw '[ScanCheck] npm.cmd was not found next to Node.js.'
+        }
+        $script:NpmCmd = $npmCommand.Source
     } else {
         $localNode = Join-Path $NodeRuntimeDir "node.exe"
         $localNpm = Join-Path $NodeRuntimeDir "npm.cmd"
-        if ((Test-Path $localNode) -and (Test-SupportedNode -NodePath $localNode) -and (Test-UsableNpm -NpmPath $localNpm)) {
+        $localMajor = if (Test-Path $localNode) { Get-NodeMajor -NodePath $localNode } else { '' }
+        if ((Test-Path $localNode) -and ($localMajor -eq $desiredMajor) -and (Test-SupportedNode -NodePath $localNode) -and (Test-UsableNpm -NpmPath $localNpm)) {
             Write-Host '[ScanCheck] Using cached local Node runtime ' + (& $localNode -v) + '.'
         } else {
             if (Test-Path $NodeRuntimeDir) {
@@ -292,7 +298,6 @@ function Select-NodeRuntime {
 
 function Ensure-SystemDependencies {
     $missing = @()
-    if (-not (Get-Command python -ErrorAction SilentlyContinue)) { $missing += "python" }
 
     $hasSupportedSystemNode = $false
     $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
@@ -307,22 +312,24 @@ function Ensure-SystemDependencies {
         $missing += "node"
     }
 
+    $venvPython = Join-Path $VenvDir "Scripts\python.exe"
+    $hasPython = (Test-Path $venvPython) -or (Get-Command python.exe -ErrorAction SilentlyContinue) -or (Get-Command py.exe -ErrorAction SilentlyContinue)
+    if (-not $hasPython) {
+        $missing += "python"
+    }
+
     if ($missing.Count -eq 0) {
         return
     }
 
     if (Get-Command winget -ErrorAction SilentlyContinue) {
-        if ($missing -contains "python") {
-            Ensure-WingetPackage -PackageId "Python.Python.3.12" -DisplayName "Python 3.12"
-        }
         if ($missing -contains "node") {
             Ensure-WingetPackage -PackageId "OpenJS.NodeJS.LTS" -DisplayName "Node.js LTS"
         }
+        if ($missing -contains "python") {
+            Ensure-WingetPackage -PackageId "Python.Python.3.12" -DisplayName "Python 3.12"
+        }
         Refresh-Path
-    }
-
-    if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
-        throw '[ScanCheck] Python is required. Install Python 3.12, then run this launcher again.'
     }
 
     $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
@@ -330,6 +337,10 @@ function Ensure-SystemDependencies {
     $hasSupportedLocalNode = (Test-Path $localNode) -and (Test-SupportedNode -NodePath $localNode) -and (Test-UsableNpm -NpmPath $localNpm)
     if (-not $hasSupportedSystemNode -and -not $hasSupportedLocalNode) {
         Write-Warning '[ScanCheck] No supported Node runtime found locally. The launcher will try to download a local Node runtime.'
+    }
+
+    if ((-not (Test-Path $venvPython)) -and (-not (Get-Command python.exe -ErrorAction SilentlyContinue)) -and (-not (Get-Command py.exe -ErrorAction SilentlyContinue))) {
+        throw '[ScanCheck] Python 3 is required for QR generation and scanner preprocessing. Install Python 3.12, then run the launcher again.'
     }
 }
 
@@ -339,17 +350,26 @@ function Ensure-PythonEnvironment {
     # If .venv exists but doesn't have the expected Windows layout (e.g. it has 'bin' from a Linux env), 
     # we must recreate it to avoid "Missing venv python" errors.
     if ((Test-Path $VenvDir) -and (-not (Test-Path $venvPython))) {
-        Write-Warning '[ScanCheck] Virtual environment at ' + $VenvDir + ' is invalid or from another OS. Recreating...'
+        Write-Warning (('[ScanCheck] Virtual environment at ') + $VenvDir + ' is invalid or from another OS. Recreating...')
         Remove-Item -Recurse -Force $VenvDir
     }
 
     if (-not (Test-Path $VenvDir)) {
-        Write-Host '[ScanCheck] Creating Python virtual environment...'
-        & python -m venv $VenvDir
+        $systemPython = Get-Command python.exe -ErrorAction SilentlyContinue
+        $pyLauncher = Get-Command py.exe -ErrorAction SilentlyContinue
+        if ($systemPython) {
+            Write-Host '[ScanCheck] Creating Python virtual environment...'
+            & $systemPython.Source -m venv $VenvDir
+        } elseif ($pyLauncher) {
+            Write-Host '[ScanCheck] Creating Python virtual environment...'
+            & $pyLauncher.Source -3 -m venv $VenvDir
+        } else {
+            throw '[ScanCheck] Python 3 is required for QR generation and scanner preprocessing.'
+        }
     }
 
     if (-not (Test-Path $venvPython)) {
-        throw '[ScanCheck] Missing venv python at ' + $venvPython
+        throw '[ScanCheck] Python virtual environment is unavailable. Delete .venv and run the launcher again.'
     }
 
     if (-not (Test-Path (Join-Path $RuntimeDir ".python_bootstrap_done"))) {
@@ -362,6 +382,12 @@ function Ensure-PythonEnvironment {
 
         New-Item -ItemType File -Path (Join-Path $RuntimeDir ".python_bootstrap_done") -Force | Out-Null
     }
+
+    & $venvPython -c "import qrcode, cv2, numpy" | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Remove-Item (Join-Path $RuntimeDir ".python_bootstrap_done") -Force -ErrorAction SilentlyContinue
+        throw '[ScanCheck] Python QR/scanner dependencies are incomplete. Run the launcher again to reinstall them.'
+    }
 }
 
 function Ensure-NodeEnvironment {
@@ -373,7 +399,7 @@ function Ensure-NodeEnvironment {
     } else {
         Push-Location $ApiDir
         try {
-            & $NpmCmd ls --depth=0 *> $null
+            cmd.exe /c "`"$NpmCmd`" ls --depth=0 >nul 2>nul"
             if ($LASTEXITCODE -ne 0) {
                 $needsInstall = $true
             }
@@ -418,8 +444,10 @@ function Ensure-NodeEnvironment {
         $venvPython = Join-Path $VenvDir "Scripts\python.exe"
         Push-Location $ApiDir
         try {
-            $env:npm_config_python = $venvPython
-            $currentRegistry = (& $NpmCmd config get registry 2>$null | Out-String).Trim()
+            if (Test-Path $venvPython) {
+                $env:npm_config_python = $venvPython
+            }
+            $currentRegistry = (cmd.exe /c "`"$NpmCmd`" config get registry 2>nul" | Out-String).Trim()
             if ($currentRegistry -and ($currentRegistry -ne $registry)) {
                 Write-Host '[ScanCheck] Overriding npm registry:'
                 Write-Host '  from: ' + $currentRegistry
@@ -428,7 +456,7 @@ function Ensure-NodeEnvironment {
 
             & $NpmCmd $npmInstallCmd --registry $registry --prefer-offline --no-audit --no-fund --progress=false --fetch-retries=5 --fetch-retry-factor=2 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000 | Out-Host
             if ($LASTEXITCODE -ne 0) {
-                Write-Warning '[ScanCheck] npm ' + $npmInstallCmd + ' failed. Retrying once after npm cache clean...'
+                Write-Warning (('[ScanCheck] npm ') + $npmInstallCmd + ' failed. Retrying once after npm cache clean...')
                 & $NpmCmd cache clean --force | Out-Host
                 & $NpmCmd $npmInstallCmd --registry $registry --prefer-offline --no-audit --no-fund --progress=false --fetch-retries=5 --fetch-retry-factor=2 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000 | Out-Host
                 if ($LASTEXITCODE -ne 0) {
@@ -438,6 +466,21 @@ function Ensure-NodeEnvironment {
         } finally {
             Pop-Location
         }
+    }
+}
+
+function Test-ApiDependencies {
+    $nodeCommand = Get-Command node.exe -ErrorAction SilentlyContinue
+    if (-not $nodeCommand -or -not (Test-Path (Join-Path $ApiDir "node_modules"))) {
+        return $false
+    }
+
+    Push-Location $ApiDir
+    try {
+        cmd.exe /c "`"$($nodeCommand.Source)`" -e `"try { require('sqlite3'); process.exit(0) } catch(e) { process.exit(1) }`" 2>nul"
+        return ($LASTEXITCODE -eq 0)
+    } finally {
+        Pop-Location
     }
 }
 
@@ -591,10 +634,9 @@ if ($cache.ContainsKey("last_successful_launch")) {
     $localNode = Join-Path $NodeRuntimeDir "node.exe"
     $nodeModules = Join-Path $ApiDir "node_modules"
     if (
-        (Test-Path $venvPython) -and
-        ((Test-Path $localNode) -or (Get-Command node -ErrorAction SilentlyContinue)) -and
+        ((Test-Path $localNode) -or (Get-Command node.exe -ErrorAction SilentlyContinue)) -and
         (Test-Path $nodeModules) -and
-        (Test-Path (Join-Path $RuntimeDir ".python_bootstrap_done"))
+        (Test-ApiDependencies)
     ) {
         $fastPath = $true
     }
