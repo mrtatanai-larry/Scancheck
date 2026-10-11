@@ -1,4 +1,11 @@
 // Answer Sheet Generator
+
+// Both header logos render at this size so the PCC seal and the course logo
+// carry equal visual weight. An individual asset can override it through
+// config.courseLogoScale when its own artwork is drawn small inside an
+// otherwise full-bleed PNG canvas, which object-fit: contain cannot correct.
+const LOGO_SIZE_IN = 0.58;
+
 class AnswerSheetGenerator {
     constructor() {
         this.PAPER_SIZES = {
@@ -14,6 +21,7 @@ class AnswerSheetGenerator {
             showInstructions: true,
             title: 'Entrance Examination',
             courseLogo: null,
+            courseLogoScale: 1,
             courseName: null,
             paperSize: 'a4'
         };
@@ -160,9 +168,12 @@ class AnswerSheetGenerator {
         // Get examId for layout display
         const examId = String(config.studentData?.examId || config.examId || '').trim();
         
-        // Right logo HTML - FORCE EXACT SAME DIMENSIONS
+        // Both header logos share LOGO_SIZE_IN so they read at equal weight.
+        // The previous pair (0.58in left / 0.45in right) left the course logo
+        // 22% smaller despite a comment claiming they were forced equal.
         const rightLogoSrc = config.courseLogo ? `images/${config.courseLogo}` : 'images/pcc.png';
         const rightLogoStyle = config.courseLogo ? 'filter: contrast(1.1);' : 'filter: grayscale(100%);';
+        const rightLogoSize = LOGO_SIZE_IN * (Number(config.courseLogoScale) || 1);
         
         let qrImg = `
             <div style="font-size:0.06in; font-weight:800; letter-spacing:0.5px; line-height:1.3; color: #333;">[ QR ]</div>
@@ -204,8 +215,8 @@ class AnswerSheetGenerator {
                 <div style="display: flex; align-items: center; justify-content: center; width: 0.68in;">
                     <img src="images/pcc.png" 
                          style="
-                            width: 0.58in;
-                            height: 0.58in;
+                            width: ${LOGO_SIZE_IN}in;
+                            height: ${LOGO_SIZE_IN}in;
                             object-fit: contain;
                             display: block;
                             filter: contrast(1.1);
@@ -259,8 +270,8 @@ class AnswerSheetGenerator {
                 ">
                     <img src="${rightLogoSrc}" 
                         style="
-                            width: 0.45in;
-                            height: 0.45in;
+                            width: ${rightLogoSize}in;
+                            height: ${rightLogoSize}in;
                             object-fit: contain;
                             display: block;
                             flex: 0 0 auto;
@@ -831,7 +842,7 @@ class MultiSubjectAnswerSheetGenerator extends AnswerSheetGenerator {
         const registrationAnchors = anchors();
 
         const layout = {
-            layoutVersion: 'generated-layout-v3-ai-print-canonical',
+            layoutVersion: 'generated-layout-v4-ai-print-canonical',
             examId,
             exam_id: examId,
             sheetId: String(studentData.sheetId || studentData.studentId || '').trim(),

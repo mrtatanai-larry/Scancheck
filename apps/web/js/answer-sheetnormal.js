@@ -1,4 +1,9 @@
 // Normal Answer Sheet Generator (Single Quiz Format)
+
+// Kept in step with answer-sheet.js so both sheet formats render identical
+// header logos. See LOGO_SIZE_IN there for why a per-asset scale exists.
+const LOGO_SIZE_IN = 0.58;
+
 class NormalAnswerSheetGenerator {
     constructor() {
         this.PAPER_SIZES = {
@@ -14,6 +19,7 @@ class NormalAnswerSheetGenerator {
             showInstructions: true,
             title: 'Entrance Examination',
             courseLogo: null,
+            courseLogoScale: 1,
             courseName: null,
             paperSize: 'a4'
         };
@@ -155,6 +161,7 @@ class NormalAnswerSheetGenerator {
         
         const rightLogoSrc = config.courseLogo ? `images/${config.courseLogo}` : 'images/pcc.png';
         const rightLogoStyle = config.courseLogo ? 'filter: contrast(1.1);' : 'filter: grayscale(100%);';
+        const rightLogoSize = LOGO_SIZE_IN * (Number(config.courseLogoScale) || 1);
         
         let qrWrapper = `
             <div style="
@@ -259,8 +266,8 @@ class NormalAnswerSheetGenerator {
                 <div style="display: flex; align-items: center; justify-content: center; width: 0.68in;">
                     <img src="images/pcc.png" 
                         style="
-                            width: 0.58in;
-                            height: 0.58in;
+                            width: ${LOGO_SIZE_IN}in;
+                            height: ${LOGO_SIZE_IN}in;
                             object-fit: contain;
                             display: block;
                             filter: contrast(1.1);
@@ -312,8 +319,8 @@ class NormalAnswerSheetGenerator {
                 ">
                     <img src="${rightLogoSrc}" 
                         style="
-                            width: 0.45in;
-                            height: 0.45in;
+                            width: ${rightLogoSize}in;
+                            height: ${rightLogoSize}in;
                             object-fit: contain;
                             display: block;
                             flex: 0 0 auto;
@@ -870,7 +877,7 @@ class NormalAnswerSheetGenerator {
         const registrationAnchors = anchors();
 
         const layout = {
-            layoutVersion: 'generated-layout-v3-ai-print-canonical',
+            layoutVersion: 'generated-layout-v4-ai-print-canonical',
             examId,
             exam_id: examId,
             sheetId: String(studentData.sheetId || studentData.studentId || '').trim(),

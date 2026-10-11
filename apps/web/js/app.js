@@ -8448,6 +8448,23 @@ class ScanCheckApp {
         return courseLogoMap[String(courseName || '').trim()] || 'pcc.png';
     }
 
+    // Most course logos fill their PNG canvas, so a shared box size renders
+    // them at matching visual weight. The Hospitality Management emblem is a
+    // circle drawn inside a square, leaving white corners that belong to the
+    // artwork rather than to the file padding - object-fit: contain cannot
+    // recover that space. Measured against the canvas, its art spans roughly
+    // 78% of the width, so it is scaled up to match. Trimming the PNGs was
+    // measured and rejected: their alpha bounding boxes are within ~2% of the
+    // full canvas, so there is no padding to remove.
+    getCourseLogoScaleForCourse(courseName) {
+        const logoScaleMap = {
+            'Bachelor of Science in Hospitality Management': 1.27,
+            'BSHM': 1.27
+        };
+        const scale = logoScaleMap[String(courseName || '').trim()];
+        return Number.isFinite(scale) ? scale : 1;
+    }
+
     getSelectedExamForSheet() {
         const selectedQuizId = document.getElementById('examQuizSelect')?.value || '';
         return this.quizzes.find((quiz) => String(quiz.id) === String(selectedQuizId)) || null;
@@ -8462,6 +8479,7 @@ class ScanCheckApp {
             title: 'ENTRANCE EXAMINATION',
             courseName: course || 'Answer Sheet',
             courseLogo: this.getCourseLogoForCourse(course),
+            courseLogoScale: this.getCourseLogoScaleForCourse(course),
             deptColor: '#004a99',
             studentData,
             questionCount: quiz?.questionCount || 100,
