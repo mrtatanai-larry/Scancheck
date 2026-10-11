@@ -118,7 +118,21 @@ function isUsablePythonCommand(commandPath) {
 // unverified geometric guess: observed failures include a landscape quad being
 // stretched onto the portrait sheet grid, which shifts every crop and silently
 // blanks whole row bands. Only a confirmed homography counts as trusted.
+const MIN_BUBBLE_COVERAGE = 0.80;
+
 function registrationFailureReason(metadata = {}) {
+    // A homography can fit the registration marks and still leave the answer
+    // grid offset. Ink coverage at the layout's own bubble coordinates is the
+    // direct evidence of whether the grid actually landed, so it overrides the
+    // anchors verdict when it disagrees.
+    const coverage = Number(metadata.bubbleCoverage);
+    if (Number.isFinite(coverage)) {
+        if (coverage < MIN_BUBBLE_COVERAGE) {
+            const mode = String(metadata.mode || 'unknown');
+            return `${mode}:low_bubble_coverage_${Math.round(coverage * 100)}pct`;
+        }
+        return null;
+    }
     if (metadata.sourceAnchorAlignment?.active) return null;
     if (metadata.anchorRefinement?.active) return null;
     const mode = String(metadata.mode || 'unknown');
@@ -148,8 +162,24 @@ function preparePageImage(imageBuffer, layout = {}, runtimePaths = {}) {
     const workerPath = path.join(__dirname, 'pagePrepWorker.py');
     const anchors = layout.registrationAnchors || layout.registration_anchors || {};
     const anchorArg = JSON.stringify(anchors);
+
+    // Bubble boxes let the worker score the warp against real printed marks.
+    // This is a geometry check only - it never looks at answers.
+    const probes = [];
+    for (const subject of (Array.isArray(layout.subjects) ? layout.subjects : [])) {
+        for (const question of (Array.isArray(subject?.questions) ? subject.questions : [])) {
+            for (const choice of Object.values(question?.choices || {})) {
+                const box = choice?.box || choice;
+                if (box && [box.left, box.top, box.right, box.bottom].every(Number.isFinite)) {
+                    probes.push([box.left, box.top, box.right, box.bottom]);
+                }
+            }
+        }
+    }
+    const probeArg = JSON.stringify(probes);
+
     return new Promise((resolve) => {
-        const child = spawn(getPythonCommand(runtimePaths), [workerPath, String(sheetWidth), String(sheetHeight), anchorArg], {
+        const child = spawn(getPythonCommand(runtimePaths), [workerPath, String(sheetWidth), String(sheetHeight), anchorArg, probeArg], {
             cwd: runtimePaths.repoRoot || process.cwd(),
             stdio: ['pipe', 'pipe', 'pipe']
         });
@@ -184,6 +214,9 @@ function preparePageImage(imageBuffer, layout = {}, runtimePaths = {}) {
                 quad: metadata.quad || null,
                 anchorRefinement: metadata.anchorRefinement || null,
                 sourceAnchorAlignment: metadata.sourceAnchorAlignment || null,
+                bubbleCoverage: Number.isFinite(Number(metadata.bubbleCoverage))
+                    ? Number(metadata.bubbleCoverage)
+                    : null,
                 registrationTrusted: isRegistrationTrusted(metadata),
                 registrationFailureReason: registrationFailureReason(metadata),
                 width: metadata.width || sheetWidth,

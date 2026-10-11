@@ -106,6 +106,66 @@ def detect_document(image):
     return edge_quad, "document_quad"
 
 
+def _parse_bubble_probes(raw):
+    """Flatten layout bubble boxes so the warp can be scored against real marks.
+
+    A printed bubble has a visible outline whether or not the student filled it,
+    so ink presence at these coordinates is a valid alignment signal that needs
+    no answer key. Returns a flat list of [left, top, right, bottom].
+    """
+    try:
+        parsed = json.loads(raw or "[]")
+    except Exception:
+        return []
+    probes = []
+    if not isinstance(parsed, list):
+        return probes
+    for box in parsed:
+        try:
+            left = float(box[0])
+            top = float(box[1])
+            right = float(box[2])
+            bottom = float(box[3])
+        except Exception:
+            continue
+        if right > left and bottom > top:
+            probes.append([left, top, right, bottom])
+    return probes
+
+
+def measure_bubble_coverage(image, probes, dark_ratio=0.05):
+    """Fraction of known bubble positions that actually contain ink.
+
+    This is the ground-truth-free alignment metric. A correct warp puts printed
+    bubble outlines inside their expected boxes, so coverage near 1.0 means the
+    layout geometry and the physical sheet agree. Low coverage means the warp is
+    wrong, which is far cheaper to detect here than to discover as a page of
+    unexplained blanks later.
+    """
+    if not probes:
+        return None
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape[:2]
+    hits = 0
+    sampled = 0
+    for left, top, right, bottom in probes:
+        x1 = max(0, int(round(left)))
+        y1 = max(0, int(round(top)))
+        x2 = min(w, int(round(right)))
+        y2 = min(h, int(round(bottom)))
+        if x2 <= x1 or y2 <= y1:
+            continue
+        sampled += 1
+        patch = gray[y1:y2, x1:x2]
+        if patch.size == 0:
+            continue
+        if float((patch < 128).mean()) > dark_ratio:
+            hits += 1
+    if sampled == 0:
+        return None
+    return round(hits / float(sampled), 4)
+
+
 def _parse_layout_anchors(raw):
     try:
         parsed = json.loads(raw or "{}")
@@ -129,20 +189,37 @@ def _parse_layout_anchors(raw):
 def _detect_source_anchor_candidates(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     _, dark = cv2.threshold(gray, 90, 255, cv2.THRESH_BINARY_INV)
-    dark = cv2.morphologyEx(dark, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8), iterations=1)
-    contours, _ = cv2.findContours(dark, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # NOTE: no morphological opening here. A 2x2 OPEN erodes the printed
+    # registration marks, which are thin and only a few pixels across on a
+    # phone photo, and can erase them outright.
 
     h, w = image.shape[:2]
     min_side = float(min(w, h))
     min_dim = max(4.0, min_side * 0.004)
     max_dim = max(24.0, min_side * 0.085)
-    candidates = []
 
-    for contour in contours:
-        area = float(cv2.contourArea(contour))
+    # Connected components, not findContours(RETR_EXTERNAL). RETR_EXTERNAL keeps
+    # only the outermost boundary, so on any scan with a dark border or a dark
+    # region touching the frame edge the entire image collapses into a single
+    # contour. Measured on a real phone scan that yielded exactly 1 contour and
+    # therefore 0 anchor candidates, which silently forced every such scan down
+    # the unverified document_quad fallback. connectedComponents separates the
+    # same image into thousands of discrete blobs.
+    count, _labels, stats, centroids = cv2.connectedComponentsWithStats(
+        (dark > 0).astype(np.uint8), 8
+    )
+
+    candidates = []
+    for index in range(1, count):
+        x, y, bw, bh, area = (
+            int(stats[index, cv2.CC_STAT_LEFT]),
+            int(stats[index, cv2.CC_STAT_TOP]),
+            int(stats[index, cv2.CC_STAT_WIDTH]),
+            int(stats[index, cv2.CC_STAT_HEIGHT]),
+            float(stats[index, cv2.CC_STAT_AREA]),
+        )
         if area <= 0:
             continue
-        x, y, bw, bh = cv2.boundingRect(contour)
         if bw < min_dim or bh < min_dim or bw > max_dim or bh > max_dim:
             continue
         # Printed registration marks blur and skew on phone photos, so keep a
@@ -155,7 +232,7 @@ def _detect_source_anchor_candidates(image):
         if fill < 0.28:
             continue
         candidates.append({
-            "center": [float(x + bw / 2.0), float(y + bh / 2.0)],
+            "center": [float(centroids[index][0]), float(centroids[index][1])],
             "bbox": [int(x), int(y), int(bw), int(bh)],
             "area": round(area, 3),
             "fill": round(fill, 3)
@@ -371,6 +448,12 @@ def _fit_anchor_homography(detections, min_inliers=4, ransac_threshold=6.0, max_
 # loose enough to recover real anchors on imperfect photos.
 ANCHOR_TOLERANCE_LADDER = (1.0, 1.75, 2.5, 3.5)
 
+# Fraction of known bubble positions that must contain printed ink for the warp
+# to be trusted. Measured 0.63 on a real phone scan whose layout predated a
+# generator geometry change, which is exactly the silent-misalignment case this
+# guards against. A correct warp lands outlines in their expected boxes.
+MIN_BUBBLE_COVERAGE = 0.80
+
 
 def refine_with_registration_anchors(warped, anchors):
     if not anchors:
@@ -413,6 +496,7 @@ def main():
     width = int(float(sys.argv[1]))
     height = int(float(sys.argv[2]))
     anchors = _parse_layout_anchors(sys.argv[3] if len(sys.argv) >= 4 else "{}")
+    probes = _parse_bubble_probes(sys.argv[4] if len(sys.argv) >= 5 else "[]")
     raw = sys.stdin.buffer.read()
     array = np.frombuffer(raw, dtype=np.uint8)
     image = cv2.imdecode(array, cv2.IMREAD_COLOR)
@@ -424,12 +508,36 @@ def main():
     quad = None
     if warped is not None:
         mode = "source_registration_anchors"
+        coverage = measure_bubble_coverage(warped, probes)
+        source_anchor_info["bubbleCoverage"] = coverage
+        # A homography can fit the registration marks and still leave the answer
+        # grid offset. Keep the document_quad alternative so the better-aligned
+        # warp can be chosen on evidence rather than on which branch ran first.
+        quad_alt, mode_alt = detect_document(image)
+        alt_matrix = cv2.getPerspectiveTransform(
+            quad_alt, np.array([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]], dtype="float32")
+        )
+        warped_alt = cv2.warpPerspective(image, alt_matrix, (width, height))
+        coverage_alt = measure_bubble_coverage(warped_alt, probes)
+        source_anchor_info["bubbleCoverageAlternative"] = coverage_alt
+        source_anchor_info["alternativeMode"] = mode_alt
+        if coverage is not None and coverage_alt is not None and coverage_alt > coverage:
+            warped = warped_alt
+            mode = mode_alt
+            coverage = coverage_alt
+            source_anchor_info["selectedBy"] = "bubble_coverage"
+            quad = quad_alt
     else:
         quad, mode = detect_document(image)
         dst = np.array([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]], dtype="float32")
         matrix = cv2.getPerspectiveTransform(quad, dst)
         warped = cv2.warpPerspective(image, matrix, (width, height))
+        coverage = measure_bubble_coverage(warped, probes)
     warped, anchor_info = refine_with_registration_anchors(warped, anchors)
+    coverage = measure_bubble_coverage(warped, probes)
+    anchor_info["bubbleCoverage"] = coverage
+    if coverage is not None and coverage < MIN_BUBBLE_COVERAGE:
+        anchor_info["coverageWarning"] = "low_bubble_coverage"
     ok, encoded = cv2.imencode(".jpg", warped, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
     if not ok:
         raise SystemExit("encode failed")
@@ -440,6 +548,7 @@ def main():
         "quad": quad.tolist() if quad is not None else None,
         "width": width,
         "height": height,
+        "bubbleCoverage": coverage,
         "sourceAnchorAlignment": source_anchor_info,
         "anchorRefinement": anchor_info
     }) + "\n")
