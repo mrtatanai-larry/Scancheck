@@ -405,7 +405,11 @@ class Database {
     }
 
     async migrate() {
-        const tables = ['scans', 'records', 'quizzes', 'answer_keys', 'subject_records', 'received_papers'];
+        // Every table that has a column-adding branch below must appear here,
+        // or its branch is unreachable. ai_omr_usage was missing, which left
+        // the thoughts_tokens guard dead: usage rows were silently discarded
+        // on every scan while the failure only surfaced as a log warning.
+        const tables = ['scans', 'records', 'quizzes', 'answer_keys', 'subject_records', 'received_papers', 'ai_omr_usage'];
         for (const table of tables) {
             const columns = await this.query(`PRAGMA table_info(${table})`);
             const columnNames = columns.map(c => c.name);
@@ -513,6 +517,50 @@ class Database {
                 if (!columnNames.includes('subject_id')) await this.run(`ALTER TABLE answer_keys ADD COLUMN subject_id INTEGER`);
             }
         }
+
+        await this.verifyMigrations();
+    }
+
+    // A migration that silently fails leaves the app running against a schema
+    // the code does not expect, which surfaces much later as a confusing
+    // runtime error in unrelated code. Re-read every column this file tries to
+    // add and report anything still missing.
+    async verifyMigrations() {
+        const expected = {
+            ai_omr_usage: ['thoughts_tokens'],
+            quizzes: ['format', 'subject_config', 'archived', 'subject_id'],
+            answer_keys: ['subject_id'],
+            subject_records: ['entry_type', 'residency_type', 'special_equity_group', 'room_no', 'seat_no', 'exam_date_time'],
+            received_papers: ['sheet_id', 'student_id', 'exam_id', 'image_file_name', 'sender_ip', 'device_id', 'image_hash', 'entry_type', 'residency_type', 'equity_group', 'age', 'room_no', 'seat_no', 'exam_date_time', 'is_scanned'],
+            records: ['sheet_id', 'student_name', 'quiz_title', 'status', 'entry_type', 'residency_type', 'special_equity_group', 'subject_code', 'subject', 'section', 'course', 'age', 'room_no', 'seat_no', 'exam_date_time', 'answers', 'raw_text', 'image_path', 'source_received_paper_id', 'review_status'],
+            scans: ['sheet_id', 'student_id', 'total_score', 'score_breakdown', 'subject_scores', 'status', 'overall_percentage', 'overall_status', 'image_path', 'thumbnail_path', 'scanned_by', 'department', 'course', 'room_no', 'seat_no', 'exam_date_time', 'general_score', 'general_total', 'general_percentage', 'general_status', 'abstract_score', 'abstract_total', 'abstract_percentage', 'abstract_status', 'entry_type', 'residency_type', 'special_equity_group', 'proctor_status']
+        };
+
+        const problems = [];
+        for (const [table, columns] of Object.entries(expected)) {
+            let present = [];
+            try {
+                present = (await this.query(`PRAGMA table_info(${table})`)).map((c) => c.name);
+            } catch (_error) {
+                problems.push(`${table}: table not found`);
+                continue;
+            }
+            const missing = columns.filter((column) => !present.includes(column));
+            if (missing.length > 0) {
+                problems.push(`${table}: missing ${missing.join(', ')}`);
+            }
+        }
+
+        if (problems.length > 0) {
+            console.error('❌ Schema migration incomplete. Writes touching these columns will fail:');
+            for (const problem of problems) {
+                console.error(`   - ${problem}`);
+            }
+            console.error('   Delete .runtime/data/scancheck.db to rebuild from schema, or add the columns by hand.');
+        } else {
+            console.log('✅ Schema migration verified: all expected columns present');
+        }
+        return problems;
     }
 
     // Generic query method
