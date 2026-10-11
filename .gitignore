@@ -40,3 +40,7 @@ android/**/build/
 
 # Temp
 *.tmp
+
+# Local agent config and Windows debug handoff doc
+SYSTEM_HANDOFF_WINDOWS_DEBUG.md
+opencode.json
