@@ -48,7 +48,6 @@ function cleanConfigPatch(input = {}) {
     if (input.promptVersion !== undefined) {
         patch.promptVersion = String(input.promptVersion || DEFAULT_PROMPT_VERSION).trim().slice(0, 80) || DEFAULT_PROMPT_VERSION;
     }
-    if (input.baseUrl !== undefined) patch.baseUrl = String(input.baseUrl || '').trim();
     if (input.timeoutMs !== undefined) patch.timeoutMs = Math.max(1000, Number.parseInt(String(input.timeoutMs), 10) || 30000);
     if (input.maxRetries !== undefined) patch.maxRetries = Math.max(0, Number.parseInt(String(input.maxRetries), 10) || 0);
     if (input.sectionSize !== undefined) patch.sectionSize = Math.max(1, Number.parseInt(String(input.sectionSize), 10) || 20);
@@ -167,7 +166,6 @@ function publicAiOmrSettings(config = {}) {
         enabled: true,
         provider: config.provider || 'gemini',
         model: config.model || 'gemini-3.6-flash',
-        baseUrl: config.baseUrl || 'http://localhost:11434',
         hasApiKey: Boolean(config.apiKey),
         apiKeyPreview: maskApiKey(config.apiKey),
         connectionStatus: config.apiKey ? 'configured' : 'missing_key',

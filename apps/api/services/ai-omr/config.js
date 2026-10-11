@@ -84,7 +84,6 @@ function getAiOmrConfig(env = process.env) {
         provider: 'gemini',
         model: normalizeGeminiModel(env.AI_OMR_MODEL || 'gemini-3.6-flash'),
         apiKey: String(env.GEMINI_API_KEY || '').trim(),
-        baseUrl: String(env.OLLAMA_BASE_URL || 'http://localhost:11434').trim(),
         timeoutMs: numberFromEnv(env.AI_OMR_TIMEOUT_MS, 30000, 1000),
         maxRetries: numberFromEnv(env.AI_OMR_MAX_RETRIES, 2, 0),
         sectionSize: numberFromEnv(env.AI_OMR_SECTION_SIZE, 20, 1),

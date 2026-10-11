@@ -7,7 +7,6 @@ const { parseImageInput, loadImage, hashImage, preparePageImage } = require('./i
 const { buildCropsForStrategy, activeQuestionNumbers, cropQuestionRange, buildTopFieldCrop } = require('./sectionCropper');
 const { decodeQrFromImage, layoutIdFromQrData } = require('./qrDecode');
 const { GeminiProvider, AiOmrProviderError } = require('./providers/geminiProvider');
-const { OllamaProvider } = require('./providers/ollamaProvider');
 const { verifyQuestionRecords } = require('./verification');
 const {
     validateOmrResult,
@@ -45,14 +44,14 @@ async function oncePerScan(key, work) {
     return promise;
 }
 
+// Gemini is the only scanner backend. validateAiOmrConfig rejects any other
+// provider before this point, so the guard here is a backstop rather than a
+// real branch.
 function createProvider(config) {
-    if (config.provider === 'gemini') {
-        return new GeminiProvider(config);
+    if (config.provider !== 'gemini') {
+        throw new AiOmrProviderError('AI_OMR_PROVIDER_UNSUPPORTED', 'Unsupported AI OMR provider.');
     }
-    if (config.provider === 'ollama') {
-        return new OllamaProvider(config);
-    }
-    throw new AiOmrProviderError('AI_OMR_PROVIDER_UNSUPPORTED', 'Unsupported AI OMR provider.');
+    return new GeminiProvider(config);
 }
 
 function normalizeStrategy(value, config) {

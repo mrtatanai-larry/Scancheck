@@ -341,7 +341,6 @@ class ScanCheckApp {
         const imageDetail = document.getElementById('aiOmrImageDetail');
         const verificationMode = document.getElementById('aiOmrVerificationMode');
         const model = document.getElementById('aiOmrModel');
-        const baseUrl = document.getElementById('aiOmrBaseUrl');
         const sectionSize = document.getElementById('aiOmrSectionSize');
         const timeoutMs = document.getElementById('aiOmrTimeoutMs');
         const maxRetries = document.getElementById('aiOmrMaxRetries');
@@ -368,7 +367,6 @@ class ScanCheckApp {
             const supportedModels = Array.from(model.options || []).map((option) => option.value);
             model.value = supportedModels.includes(selectedModel) ? selectedModel : 'gemini-3.6-flash';
         }
-        if (baseUrl) baseUrl.value = settings.baseUrl || 'http://localhost:11434';
         if (sectionSize) sectionSize.value = String(settings.sectionSize || 20);
         if (timeoutMs) timeoutMs.value = String(settings.timeoutMs || 30000);
         if (maxRetries) maxRetries.value = String(settings.maxRetries ?? 2);
@@ -398,11 +396,9 @@ class ScanCheckApp {
     updateAiOmrProviderFields() {
         const model = document.getElementById('aiOmrModel');
         const apiKey = document.getElementById('aiOmrApiKey');
-        const baseUrlGroup = document.getElementById('aiOmrBaseUrlGroup');
 
         if (model && !model.value) model.value = 'gemini-3.6-flash';
         if (apiKey) apiKey.placeholder = 'Paste a new Gemini API key';
-        if (baseUrlGroup) baseUrlGroup.classList.add('d-none');
     }
 
     async loadAiOmrSettings() {
@@ -429,7 +425,6 @@ class ScanCheckApp {
             imageDetail: document.getElementById('aiOmrImageDetail')?.value || 'medium',
             verificationMode: document.getElementById('aiOmrVerificationMode')?.value || 'uncertain',
             model: document.getElementById('aiOmrModel')?.value || 'gemini-3.6-flash',
-            baseUrl: document.getElementById('aiOmrBaseUrl')?.value || 'http://localhost:11434',
             sectionSize: Number.parseInt(document.getElementById('aiOmrSectionSize')?.value || '20', 10),
             timeoutMs: Number.parseInt(document.getElementById('aiOmrTimeoutMs')?.value || '30000', 10),
             maxRetries: Number.parseInt(document.getElementById('aiOmrMaxRetries')?.value || '2', 10),
