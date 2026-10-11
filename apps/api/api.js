@@ -4849,6 +4849,7 @@ function aiOmrUsagePayload(scanResult = {}, extra = {}) {
         inputTokens: Number.isFinite(Number(usage.inputTokens)) ? Number(usage.inputTokens) : null,
         outputTokens: Number.isFinite(Number(usage.outputTokens)) ? Number(usage.outputTokens) : null,
         totalTokens: Number.isFinite(Number(usage.totalTokens)) ? Number(usage.totalTokens) : null,
+        thoughtsTokens: Number.isFinite(Number(usage.thoughtsTokens)) ? Number(usage.thoughtsTokens) : null,
         processingTimeMs: Number(metrics.latencyMs || extra.processingTimeMs || 0) || null,
         reviewCount: Array.isArray(scanResult.needsReview) ? scanResult.needsReview.length : Number(extra.reviewCount || 0),
         success: scanResult.success !== false,
@@ -4861,9 +4862,9 @@ async function recordAiOmrUsage(usage = {}) {
         await database.run(
             `INSERT INTO ai_omr_usage (
                 request_id, layout_id, exam_id, provider, model, strategy,
-                question_count, request_count, input_tokens, output_tokens, total_tokens,
+                question_count, request_count, input_tokens, output_tokens, total_tokens, thoughts_tokens,
                 processing_time_ms, review_count, success, error_code
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 usage.requestId || null,
                 usage.layoutId || null,
@@ -4876,6 +4877,7 @@ async function recordAiOmrUsage(usage = {}) {
                 usage.inputTokens,
                 usage.outputTokens,
                 usage.totalTokens,
+                usage.thoughtsTokens,
                 usage.processingTimeMs || null,
                 usage.reviewCount || 0,
                 usage.success ? 1 : 0,
@@ -4895,6 +4897,7 @@ async function aiUsageAggregate(whereSql, params = []) {
             COALESCE(SUM(input_tokens), 0) AS inputTokens,
             COALESCE(SUM(output_tokens), 0) AS outputTokens,
             COALESCE(SUM(total_tokens), 0) AS totalTokens,
+            COALESCE(SUM(thoughts_tokens), 0) AS thoughtsTokens,
             COALESCE(AVG(processing_time_ms), 0) AS averageProcessingMs,
             COALESCE(AVG(request_count), 0) AS averageRequests
          FROM ai_omr_usage
@@ -4908,6 +4911,7 @@ async function aiUsageAggregate(whereSql, params = []) {
         inputTokens: Number(row.inputTokens || 0),
         outputTokens: Number(row.outputTokens || 0),
         totalTokens: Number(row.totalTokens || 0),
+        thoughtsTokens: Number(row.thoughtsTokens || 0),
         averageProcessingMs: Math.round(Number(row.averageProcessingMs || 0)),
         averageRequests: Math.round(Number(row.averageRequests || 0) * 10) / 10
     };

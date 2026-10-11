@@ -45,6 +45,47 @@ function groupQuestionRanges(questions, size) {
     return ranges;
 }
 
+function normalSheetVisualQuestionRanges(layout = {}, options = {}) {
+    if (layout.format !== 'normal') return null;
+
+    const rows = subjectQuestions(layout)
+        .filter((row) => row.row && Number.isFinite(Number(row.row.left)) && Number.isFinite(Number(row.row.right)) && Number.isFinite(Number(row.row.top)))
+        .map((row) => ({
+            ...row,
+            centerX: (Number(row.row.left) + Number(row.row.right)) / 2,
+            top: Number(row.row.top)
+        }));
+    if (rows.length === 0) return null;
+
+    const sheetSize = layout.sheetSize || layout.sheet_size || {};
+    const sheetWidth = Number(sheetSize.width) || 800;
+    const columnThreshold = Math.max(42, sheetWidth * 0.07);
+    const columns = [];
+
+    for (const row of rows.sort((a, b) => a.centerX - b.centerX || a.top - b.top)) {
+        const column = columns.find((candidate) => Math.abs(candidate.centerX - row.centerX) <= columnThreshold);
+        if (column) {
+            column.rows.push(row);
+            column.centerX = column.rows.reduce((sum, item) => sum + item.centerX, 0) / column.rows.length;
+        } else {
+            columns.push({ centerX: row.centerX, rows: [row] });
+        }
+    }
+
+    const maxQuestionsPerCrop = Math.max(24, Number(options.maxQuestionsPerCrop) || 36);
+    const ranges = [];
+    for (const column of columns.sort((a, b) => a.centerX - b.centerX)) {
+        const questions = column.rows
+            .sort((a, b) => a.top - b.top || a.question - b.question)
+            .map((row) => row.question);
+        for (let index = 0; index < questions.length; index += maxQuestionsPerCrop) {
+            ranges.push(questions.slice(index, index + maxQuestionsPerCrop));
+        }
+    }
+
+    return ranges.length > 0 ? ranges : null;
+}
+
 function layoutBoundsForQuestions(layout, questions) {
     const wanted = new Set(questions.map(Number));
     const rows = subjectQuestions(layout).filter((row) => wanted.has(row.question));
@@ -56,6 +97,7 @@ function layoutBoundsForQuestions(layout, questions) {
 
     for (const row of rows) {
         if (row.subjectCode) subjects.add(row.subjectCode);
+        const geometryBefore = { x: xs.length, y: ys.length };
         if (row.row) {
             xs.push(Number(row.row.left), Number(row.row.right));
             ys.push(Number(row.row.top), Number(row.row.bottom));
@@ -65,8 +107,14 @@ function layoutBoundsForQuestions(layout, questions) {
             xs.push(Number(box.left), Number(box.right), Number(choice.x));
             ys.push(Number(box.top), Number(box.bottom), Number(choice.y));
         }
-        if (row.block) {
+        // row.block is the SUBJECT rect and spans every column that subject
+        // occupies. Including it unconditionally widened each column crop to the
+        // whole answer grid, so Q1-30 and Q31-60 received identical images and
+        // the model had no way to tell which column was which. Use it only as a
+        // rescue for questions that contribute no geometry of their own.
+        if (xs.length === geometryBefore.x && ys.length === geometryBefore.y && row.block) {
             xs.push(Number(row.block.left), Number(row.block.right));
+            ys.push(Number(row.block.top), Number(row.block.bottom));
         }
     }
 
@@ -202,11 +250,22 @@ async function cropQuestionRange(image, layout, questions, options = {}) {
     const sheetSize = getSheetSize(layout, image);
     const bounds = layoutBoundsForQuestions(layout, questions);
     if (!bounds) {
+        // Falling back to the whole sheet here would hand the model an image
+        // containing every column while only some question numbers were
+        // requested, which is indistinguishable from a real sheet. Signal the
+        // failure instead so the caller can flag those questions for review.
         return {
-            ...(await imageToJpeg(image, options)),
-            cropKind: 'whole_sheet_fallback',
+            buffer: null,
+            mimeType: null,
+            crop: null,
+            width: 0,
+            height: 0,
+            cropKind: 'unresolved_bounds',
             questions,
-            subjects: []
+            subjects: [],
+            questionMappings: [],
+            unresolved: true,
+            reason: 'no_layout_geometry_for_questions'
         };
     }
     const expanded = expandLayoutBounds(bounds, sheetSize, options.margin);
@@ -252,7 +311,7 @@ async function buildCropsForStrategy(image, layout, strategy, options = {}) {
     }
 
     const sectionSize = strategy === 'section_10' ? 10 : Number(options.sectionSize) || 20;
-    const ranges = groupQuestionRanges(questions, Math.max(1, sectionSize));
+    const ranges = normalSheetVisualQuestionRanges(layout, options) || groupQuestionRanges(questions, Math.max(1, sectionSize));
     const crops = [];
     for (const range of ranges) {
         crops.push(await cropQuestionRange(image, layout, range, options));

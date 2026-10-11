@@ -6,6 +6,11 @@ const {
     normalizeStrategyName,
     normalizeImageDetail,
     normalizeVerificationMode,
+    normalizeThinkingLevel,
+    normalizeBlankReviewRate,
+    normalizeBlankRunThreshold,
+    supportsThinkingLevel,
+    THINKING_LEVELS,
     DEFAULT_PROMPT_VERSION
 } = require('./config');
 
@@ -37,6 +42,9 @@ function cleanConfigPatch(input = {}) {
     if (input.strategy !== undefined) patch.strategy = normalizeStrategyName(input.strategy);
     if (input.imageDetail !== undefined) patch.imageDetail = normalizeImageDetail(input.imageDetail);
     if (input.verificationMode !== undefined) patch.verificationMode = normalizeVerificationMode(input.verificationMode);
+    if (input.thinkingLevel !== undefined) patch.thinkingLevel = normalizeThinkingLevel(input.thinkingLevel);
+    if (input.blankReviewRate !== undefined) patch.blankReviewRate = normalizeBlankReviewRate(input.blankReviewRate);
+    if (input.blankRunThreshold !== undefined) patch.blankRunThreshold = normalizeBlankRunThreshold(input.blankRunThreshold);
     if (input.promptVersion !== undefined) {
         patch.promptVersion = String(input.promptVersion || DEFAULT_PROMPT_VERSION).trim().slice(0, 80) || DEFAULT_PROMPT_VERSION;
     }
@@ -88,6 +96,13 @@ function loadAiOmrSettings(runtimePaths = {}) {
         strategy: normalizeStrategyName(persisted.strategy || envConfig.strategy),
         imageDetail: normalizeImageDetail(persisted.imageDetail || envConfig.imageDetail),
         verificationMode: normalizeVerificationMode(persisted.verificationMode || envConfig.verificationMode),
+        thinkingLevel: normalizeThinkingLevel(persisted.thinkingLevel || envConfig.thinkingLevel),
+        blankReviewRate: Number.isFinite(Number(persisted.blankReviewRate))
+            ? normalizeBlankReviewRate(persisted.blankReviewRate)
+            : envConfig.blankReviewRate,
+        blankRunThreshold: Number.isFinite(Number(persisted.blankRunThreshold))
+            ? normalizeBlankRunThreshold(persisted.blankRunThreshold)
+            : envConfig.blankRunThreshold,
         promptVersion: String(persisted.promptVersion || envConfig.promptVersion || DEFAULT_PROMPT_VERSION).trim() || DEFAULT_PROMPT_VERSION,
         instructionPrompt: String(persisted.instructionPrompt || DEFAULT_SCANNER_PROMPT).trim() || DEFAULT_SCANNER_PROMPT
     };
@@ -119,6 +134,13 @@ function saveAiOmrSettings(input = {}, runtimePaths = {}) {
         strategy: normalizeStrategyName(patch.strategy || existing.strategy),
         imageDetail: normalizeImageDetail(patch.imageDetail || existing.imageDetail),
         verificationMode: normalizeVerificationMode(patch.verificationMode || existing.verificationMode),
+        thinkingLevel: normalizeThinkingLevel(patch.thinkingLevel || existing.thinkingLevel),
+        blankReviewRate: patch.blankReviewRate !== undefined || existing.blankReviewRate !== undefined
+            ? normalizeBlankReviewRate(patch.blankReviewRate ?? existing.blankReviewRate)
+            : undefined,
+        blankRunThreshold: patch.blankRunThreshold !== undefined || existing.blankRunThreshold !== undefined
+            ? normalizeBlankRunThreshold(patch.blankRunThreshold ?? existing.blankRunThreshold)
+            : undefined,
         promptVersion: String(patch.promptVersion || existing.promptVersion || DEFAULT_PROMPT_VERSION).trim() || DEFAULT_PROMPT_VERSION,
         providerKeys,
         updatedAt: new Date().toISOString()
@@ -152,6 +174,11 @@ function publicAiOmrSettings(config = {}) {
         strategy: normalizeStrategyName(config.strategy),
         imageDetail: normalizeImageDetail(config.imageDetail),
         verificationMode: normalizeVerificationMode(config.verificationMode),
+        thinkingLevel: normalizeThinkingLevel(config.thinkingLevel),
+        thinkingLevelSupported: supportsThinkingLevel(config.model),
+        thinkingLevels: THINKING_LEVELS,
+        blankReviewRate: normalizeBlankReviewRate(config.blankReviewRate),
+        blankRunThreshold: normalizeBlankRunThreshold(config.blankRunThreshold),
         promptVersion: String(config.promptVersion || DEFAULT_PROMPT_VERSION),
         timeoutMs: Number(config.timeoutMs) || 30000,
         maxRetries: Number(config.maxRetries) || 0,

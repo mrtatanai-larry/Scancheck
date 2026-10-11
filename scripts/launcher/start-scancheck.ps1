@@ -5,7 +5,18 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$ScriptDir = (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$ScriptDir = $null
+if ($PSScriptRoot) {
+  $ScriptDir = $PSScriptRoot
+} elseif ($env:SCANCHECK_PS_SCRIPT -and (Test-Path $env:SCANCHECK_PS_SCRIPT)) {
+  $ScriptDir = Split-Path -Parent $env:SCANCHECK_PS_SCRIPT
+} else {
+  try {
+    $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+  } catch {
+    $ScriptDir = Get-Location
+  }
+}
 $RootDir = (Resolve-Path (Join-Path $ScriptDir "..\..")).ProviderPath
 $RuntimeDir = Join-Path $RootDir ".runtime"
 $LogDir = Join-Path $RuntimeDir "logs"
@@ -346,15 +357,18 @@ function Ensure-SystemDependencies {
 
 function Ensure-PythonEnvironment {
     $venvPython = Join-Path $VenvDir "Scripts\python.exe"
-    
+    $bootstrapDoneFile = Join-Path $RuntimeDir ".python_bootstrap_done"
+
     # If .venv exists but doesn't have the expected Windows layout (e.g. it has 'bin' from a Linux env), 
     # we must recreate it to avoid "Missing venv python" errors.
     if ((Test-Path $VenvDir) -and (-not (Test-Path $venvPython))) {
         Write-Warning (('[ScanCheck] Virtual environment at ') + $VenvDir + ' is invalid or from another OS. Recreating...')
         Remove-Item -Recurse -Force $VenvDir
+        Remove-Item $bootstrapDoneFile -Force -ErrorAction SilentlyContinue
     }
 
     if (-not (Test-Path $VenvDir)) {
+        Remove-Item $bootstrapDoneFile -Force -ErrorAction SilentlyContinue
         $systemPython = Get-Command python.exe -ErrorAction SilentlyContinue
         $pyLauncher = Get-Command py.exe -ErrorAction SilentlyContinue
         if ($systemPython) {
@@ -372,21 +386,31 @@ function Ensure-PythonEnvironment {
         throw '[ScanCheck] Python virtual environment is unavailable. Delete .venv and run the launcher again.'
     }
 
-    if (-not (Test-Path (Join-Path $RuntimeDir ".python_bootstrap_done"))) {
-        Write-Host '[ScanCheck] Installing Python dependencies...'
+    $depsOk = $false
+    try {
+        & $venvPython -c "import qrcode, cv2, numpy" 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $depsOk = $true
+        }
+    } catch {
+        $depsOk = $false
+    }
+
+    if (-not $depsOk -or -not (Test-Path $bootstrapDoneFile)) {
+        Write-Host '[ScanCheck] Installing/repairing Python dependencies...'
+        Remove-Item $bootstrapDoneFile -Force -ErrorAction SilentlyContinue
         & $venvPython -m pip install --upgrade pip | Out-Host
 
         $requirementsPath = Join-Path $RootDir "requirements.txt"
         & $venvPython -m pip install -r $requirementsPath | Out-Host
         if ($LASTEXITCODE -ne 0) { throw '[ScanCheck] Python dependency install failed.' }
 
-        New-Item -ItemType File -Path (Join-Path $RuntimeDir ".python_bootstrap_done") -Force | Out-Null
-    }
+        & $venvPython -c "import qrcode, cv2, numpy" | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw '[ScanCheck] Python QR/scanner dependencies are incomplete after pip install.'
+        }
 
-    & $venvPython -c "import qrcode, cv2, numpy" | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Remove-Item (Join-Path $RuntimeDir ".python_bootstrap_done") -Force -ErrorAction SilentlyContinue
-        throw '[ScanCheck] Python QR/scanner dependencies are incomplete. Run the launcher again to reinstall them.'
+        New-Item -ItemType File -Path $bootstrapDoneFile -Force | Out-Null
     }
 }
 
@@ -634,6 +658,8 @@ if ($cache.ContainsKey("last_successful_launch")) {
     $localNode = Join-Path $NodeRuntimeDir "node.exe"
     $nodeModules = Join-Path $ApiDir "node_modules"
     if (
+        (Test-Path $venvPython) -and
+        (Test-Path (Join-Path $RuntimeDir ".python_bootstrap_done")) -and
         ((Test-Path $localNode) -or (Get-Command node.exe -ErrorAction SilentlyContinue)) -and
         (Test-Path $nodeModules) -and
         (Test-ApiDependencies)

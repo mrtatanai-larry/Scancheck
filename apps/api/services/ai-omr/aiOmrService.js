@@ -92,11 +92,11 @@ function imageOptionsForDetail(detail, strategy) {
 }
 
 function emptyTokenUsage() {
-    return { inputTokens: null, outputTokens: null, totalTokens: null };
+    return { inputTokens: null, outputTokens: null, totalTokens: null, thoughtsTokens: null };
 }
 
 function addUsageTotals(total, usage = {}) {
-    for (const key of ['inputTokens', 'outputTokens', 'totalTokens']) {
+    for (const key of ['inputTokens', 'outputTokens', 'totalTokens', 'thoughtsTokens']) {
         const value = Number(usage[key]);
         if (!Number.isFinite(value)) continue;
         total[key] = Number(total[key] || 0) + value;
@@ -263,17 +263,74 @@ function unreadableRecordCount(records = [], confidenceThreshold = 0.75) {
     }).length;
 }
 
-function shouldRetrySectionRead(records = [], requestedQuestions = [], confidenceThreshold = 0.75) {
+function blankRecordCount(records = []) {
+    return records.filter((record) => String(record?.state || '').toLowerCase() === 'blank').length;
+}
+
+// A crop that is clipped or misaligned reports "blank" for the rows it never
+// contained, and those blanks arrive as a CONTIGUOUS block anchored at one end
+// of the section. A student who skips questions produces scattered blanks, so
+// an edge-anchored run is a far stronger misalignment signal than raw density.
+function boundaryBlankRun(records = []) {
+    const isBlank = (record) => String(record?.state || '').toLowerCase() === 'blank';
+    let leading = 0;
+    for (const record of records) {
+        if (!isBlank(record)) break;
+        leading += 1;
+    }
+    let trailing = 0;
+    for (let index = records.length - 1; index >= 0; index -= 1) {
+        if (!isBlank(records[index])) break;
+        trailing += 1;
+    }
+    return Math.max(leading, trailing);
+}
+
+// A crop that is misaligned or clipped reports "blank" for the rows it never
+// contained, often with high confidence. That is indistinguishable from a
+// genuine blank page by confidence alone, so detect it structurally instead.
+function blankRateExceeds(records = [], blankReviewRate = 0.5, blankRunThreshold = 5) {
+    const runThreshold = Number(blankRunThreshold);
+    if (Number.isFinite(runThreshold) && runThreshold > 0
+        && boundaryBlankRun(records) >= runThreshold) {
+        return true;
+    }
+    const threshold = Number(blankReviewRate);
+    if (!records.length || !Number.isFinite(threshold) || threshold <= 0) return false;
+    return blankRecordCount(records) / records.length >= threshold;
+}
+
+function markBlankAnomaly(records = [], blankReviewRate = 0.5, blankRunThreshold = 5, reviewStatus = 'blank_density_anomaly') {
+    if (!blankRateExceeds(records, blankReviewRate, blankRunThreshold)) return records;
+    return records.map((record) => {
+        if (String(record?.state || '').toLowerCase() !== 'blank') return record;
+        return {
+            ...record,
+            needsReview: true,
+            reviewStatus
+        };
+    });
+}
+
+function shouldRetrySectionRead(records = [], requestedQuestions = [], confidenceThreshold = 0.75, blankReviewRate = 0.5, blankRunThreshold = 5) {
     const expected = Math.max(1, requestedQuestions.length || records.length || 1);
+    if (blankRateExceeds(records, blankReviewRate, blankRunThreshold)) return true;
     const unreadable = unreadableRecordCount(records, confidenceThreshold);
     return expected >= 10 && unreadable >= Math.max(5, Math.ceil(expected * 0.30));
 }
 
-function preferSectionRecords(candidateRecords, currentRecords, confidenceThreshold = 0.75) {
+function preferSectionRecords(candidateRecords, currentRecords, confidenceThreshold = 0.75, blankReviewRate = 0.5) {
     const candidateUnreadable = unreadableRecordCount(candidateRecords, confidenceThreshold);
     const currentUnreadable = unreadableRecordCount(currentRecords, confidenceThreshold);
     if (candidateUnreadable < currentUnreadable) return true;
     if (candidateUnreadable > currentUnreadable) return false;
+
+    // A retry that recovers actual marks is better even when both passes look
+    // equally "readable", which is the common outcome of a re-cropped section.
+    const candidateBlanks = blankRecordCount(candidateRecords);
+    const currentBlanks = blankRecordCount(currentRecords);
+    if (candidateBlanks < currentBlanks) return true;
+    if (candidateBlanks > currentBlanks) return false;
 
     const candidateSelected = candidateRecords.filter((record) => record.state === 'selected').length;
     const currentSelected = currentRecords.filter((record) => record.state === 'selected').length;
@@ -425,6 +482,24 @@ async function runAiOmrScan(options = {}) {
             const crop = crops[index];
             const sectionId = `${strategy}_${index + 1}`;
             const sectionStarted = Date.now();
+            if (crop.unresolved) {
+                // No layout geometry for these questions, so no crop could be
+                // built. Never report them as blank; they were never examined.
+                records.push(...uncertainRecordsForQuestions(crop.questions, sectionId, 'crop_bounds_unresolved'));
+                sections.push({
+                    sectionId,
+                    cropKind: crop.cropKind,
+                    questions: crop.questions,
+                    subjects: [],
+                    crop: null,
+                    latencyMs: Date.now() - sectionStarted,
+                    providerLatencyMs: 0,
+                    attempts: 0,
+                    status: 'review',
+                    errorCode: 'AI_OMR_CROP_BOUNDS_UNRESOLVED'
+                });
+                continue;
+            }
             try {
                 let section = await runSectionWithValidation(provider, crop, crop.questions, 1);
                 let sectionApiCalls = section.apiCalls || 1;
@@ -434,7 +509,7 @@ async function runAiOmrScan(options = {}) {
                 let chosenCrop = crop;
                 let chosenRecords = section.validation.questions;
                 let retryInfo = null;
-                if (shouldRetrySectionRead(chosenRecords, crop.questions, config.confidenceThreshold)) {
+                if (shouldRetrySectionRead(chosenRecords, crop.questions, config.confidenceThreshold, config.blankReviewRate, config.blankRunThreshold)) {
                     try {
                         const widerCrop = await cropQuestionRange(image, options.layout, crop.questions, {
                             ...imageDetailOptions,
@@ -445,10 +520,14 @@ async function runAiOmrScan(options = {}) {
                         });
                         const retrySection = await runSectionWithValidation(provider, widerCrop, crop.questions, 1);
                         retryInfo = {
-                            reason: 'many_unreadable_records',
-                            status: preferSectionRecords(retrySection.validation.questions, chosenRecords, config.confidenceThreshold) ? 'used' : 'kept_initial',
+                            reason: blankRateExceeds(chosenRecords, config.blankReviewRate, config.blankRunThreshold)
+                                ? 'blank_density_anomaly'
+                                : 'many_unreadable_records',
+                            status: preferSectionRecords(retrySection.validation.questions, chosenRecords, config.confidenceThreshold, config.blankReviewRate) ? 'used' : 'kept_initial',
                             initialUnreadable: unreadableRecordCount(chosenRecords, config.confidenceThreshold),
-                            retryUnreadable: unreadableRecordCount(retrySection.validation.questions, config.confidenceThreshold)
+                            retryUnreadable: unreadableRecordCount(retrySection.validation.questions, config.confidenceThreshold),
+                            initialBlanks: blankRecordCount(chosenRecords),
+                            retryBlanks: blankRecordCount(retrySection.validation.questions)
                         };
                         sectionApiCalls += retrySection.apiCalls || 1;
                         sectionProviderLatencyMs += retrySection.response.latencyMs || 0;
@@ -469,7 +548,9 @@ async function runAiOmrScan(options = {}) {
                 apiCallCount += sectionApiCalls;
                 providerLatencyMs += sectionProviderLatencyMs;
                 addUsageTotals(tokenUsage, sectionTokenUsage);
-                records.push(...markSource(chosenRecords, sectionId));
+                const finalRecords = markBlankAnomaly(chosenRecords, config.blankReviewRate, config.blankRunThreshold);
+                const sectionHasBlankAnomaly = finalRecords.some((record) => record.reviewStatus === 'blank_density_anomaly');
+                records.push(...markSource(finalRecords, sectionId));
                 sections.push({
                     sectionId,
                     cropKind: chosenCrop.cropKind,
@@ -479,7 +560,9 @@ async function runAiOmrScan(options = {}) {
                     latencyMs: Date.now() - sectionStarted,
                     providerLatencyMs: sectionProviderLatencyMs,
                     attempts: section.attempts,
-                    status: 'ok',
+                    status: sectionHasBlankAnomaly ? 'review' : 'ok',
+                    blanks: blankRecordCount(finalRecords),
+                    blankRate: finalRecords.length ? blankRecordCount(finalRecords) / finalRecords.length : 0,
                     retry: retryInfo
                 });
             } catch (error) {
@@ -503,6 +586,17 @@ async function runAiOmrScan(options = {}) {
         }
 
         let finalRecords = records.sort((a, b) => a.question - b.question);
+        const registrationTrusted = preparedImage.registrationTrusted === true;
+        const registrationReason = preparedImage.registrationFailureReason || 'unverified';
+        if (!registrationTrusted) {
+            // The sheet was warped without verified alignment, so crop rects may
+            // be offset. Never report a clean scan in that case.
+            finalRecords = finalRecords.map((record) => ({
+                ...record,
+                needsReview: true,
+                reviewStatus: record.reviewStatus || `registration_untrusted:${registrationReason}`
+            }));
+        }
         let verificationMetrics = null;
         if (verifyLowConfidence) {
             const verification = await verifyQuestionRecords({
@@ -521,7 +615,7 @@ async function runAiOmrScan(options = {}) {
         } else {
             finalRecords = finalRecords.map((record) => ({
                 ...record,
-                needsReview: record.state === 'uncertain'
+                needsReview: record.state === 'uncertain' || record.needsReview === true
             }));
         }
 
@@ -546,6 +640,7 @@ async function runAiOmrScan(options = {}) {
             strategy,
             imageDetail: config.imageDetail || 'medium',
             verificationMode: config.verificationMode || 'uncertain',
+            thinkingLevel: config.thinkingLevel || 'LOW',
             promptVersion: config.promptVersion || 'omr-prompt-v1',
             status: scanStatusFromRecords(finalRecords, expectedQuestions.length),
             answers,
@@ -566,8 +661,11 @@ async function runAiOmrScan(options = {}) {
                 pagePreparation: {
                     mode: preparedImage.mode,
                     usedWorker: preparedImage.usedWorker,
+                    registrationTrusted: preparedImage.registrationTrusted === true,
+                    registrationFailureReason: preparedImage.registrationFailureReason || null,
                     quad: preparedImage.quad || null,
                     anchorRefinement: preparedImage.anchorRefinement || null,
+                    sourceAnchorAlignment: preparedImage.sourceAnchorAlignment || null,
                     width: preparedImage.width || image.bitmap.width,
                     height: preparedImage.height || image.bitmap.height
                 },

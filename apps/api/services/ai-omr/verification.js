@@ -7,9 +7,12 @@ const {
 
 function keepPrimaryWhenVerificationUnavailable(record, confidenceThreshold, reviewStatus) {
     const review = needsVerification(record, confidenceThreshold);
+    // Preserve flags raised earlier (e.g. blank_density_anomaly). A confident
+    // "blank" still needs surfacing when the section looked mis-cropped.
+    const alreadyFlagged = record.needsReview === true;
     return {
         ...record,
-        needsReview: review,
+        needsReview: review || alreadyFlagged,
         reviewStatus: review ? reviewStatus : record.reviewStatus
     };
 }
@@ -33,13 +36,14 @@ async function verifyQuestionRecords({
         tokenUsage: {
             inputTokens: null,
             outputTokens: null,
-            totalTokens: null
+            totalTokens: null,
+            thoughtsTokens: null
         }
     };
 
     for (const record of records) {
         if (!needsVerification(record, confidenceThreshold)) {
-            output.push({ ...record, needsReview: false });
+            output.push({ ...record, needsReview: record.needsReview === true });
             continue;
         }
 
@@ -56,7 +60,7 @@ async function verifyQuestionRecords({
             });
             verificationMetrics.apiCalls += Number(response.attempts) || 1;
             verificationMetrics.latencyMs += response.latencyMs || 0;
-            for (const key of ['inputTokens', 'outputTokens', 'totalTokens']) {
+            for (const key of ['inputTokens', 'outputTokens', 'totalTokens', 'thoughtsTokens']) {
                 const value = Number(response.usage?.[key]);
                 if (Number.isFinite(value)) {
                     verificationMetrics.tokenUsage[key] = Number(verificationMetrics.tokenUsage[key] || 0) + value;
@@ -69,6 +73,10 @@ async function verifyQuestionRecords({
                 continue;
             }
             const merged = mergeVerificationResult(record, validation.questions[0]);
+            if (record.needsReview === true) {
+                merged.needsReview = true;
+                merged.reviewStatus = record.reviewStatus || merged.reviewStatus;
+            }
             if (merged.reviewStatus === 'ai_pass_disagreement') {
                 verificationMetrics.disagreed += 1;
             } else {

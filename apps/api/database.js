@@ -307,6 +307,7 @@ class Database {
                     input_tokens INTEGER,
                     output_tokens INTEGER,
                     total_tokens INTEGER,
+                    thoughts_tokens INTEGER,
                     processing_time_ms INTEGER,
                     review_count INTEGER,
                     success INTEGER DEFAULT 0,
@@ -433,6 +434,9 @@ class Database {
                 if (!columnNames.includes('room_no')) await this.run(`ALTER TABLE subject_records ADD COLUMN room_no TEXT`);
                 if (!columnNames.includes('seat_no')) await this.run(`ALTER TABLE subject_records ADD COLUMN seat_no TEXT`);
                 if (!columnNames.includes('exam_date_time')) await this.run(`ALTER TABLE subject_records ADD COLUMN exam_date_time TEXT`);
+            }
+            if (table === 'ai_omr_usage') {
+                if (!columnNames.includes('thoughts_tokens')) await this.run(`ALTER TABLE ai_omr_usage ADD COLUMN thoughts_tokens INTEGER`);
             }
 
             if (table === 'scans') {

@@ -539,16 +539,16 @@ class NormalAnswerSheetGenerator {
         for (let i = 0; i < optionsCount; i++) {
             options += `
                 <span style="display: inline-flex; align-items: center; margin: 0; flex: 0 0 auto;">
-                    <span class="bubble" data-layout-choice="${optionLetters[i]}" style="width: 0.2in; height: 0.2in; border: 2px solid ${color}; border-radius: 50%; display: inline-block; box-sizing: border-box;"></span>
-                    <span class="bubble-label" style="font-size: 0.10in; font-weight: 900; font-family: Arial, sans-serif; margin-left: 0.03in; color: #000;">${optionLetters[i]}</span>
+                    <span class="bubble" data-layout-choice="${optionLetters[i]}" style="width: 0.145in; height: 0.145in; border: 1.6px solid ${color}; border-radius: 50%; display: inline-block; box-sizing: border-box;"></span>
+                    <span class="bubble-label" style="font-size: 0.085in; font-weight: 900; font-family: Arial, sans-serif; margin-left: 0.03in; color: #000;">${optionLetters[i]}</span>
                 </span>
             `;
         }
 
         return `
-            <div class="question-row" data-layout-question="${questionNumber}" style="display: flex; align-items: center; border-bottom: 0.5px solid #bbb; padding: 0; flex: 1 1 0; width: 100%; min-height: 0; box-sizing: border-box;">
-                <strong style="font-size: 0.095in; width: 0.3in; text-align: right; margin-right: 0.06in; color: #000; font-family: Arial, sans-serif;">${questionNumber}.</strong>
-                <div style="display: flex; justify-content: space-between; align-items: center; flex: 1; padding: 0 0.08in 0 0.04in; max-width: 100%; box-sizing: border-box; overflow: hidden;">
+            <div class="question-row" data-layout-question="${questionNumber}" style="display: flex; align-items: center; border-bottom: 0.5px solid #bbb; padding: 0.003in 0; flex: 1 1 0; width: 100%; min-height: 0; box-sizing: border-box;">
+                <strong style="font-size: 0.088in; width: 0.28in; text-align: right; margin-right: 0.055in; color: #000; font-family: Arial, sans-serif;">${questionNumber}.</strong>
+                <div style="display: flex; justify-content: space-between; align-items: center; flex: 1; gap: 0.07in; padding: 0 0.12in 0 0.05in; max-width: 100%; box-sizing: border-box; overflow: hidden;">
                     ${options}
                 </div>
             </div>

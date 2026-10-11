@@ -332,8 +332,9 @@ setup_python_env() {
     fi
 
     if [ ! -d "${VENV_DIR}" ]; then
+        rm -f "${RUNTIME_DIR}/.python_bootstrap_done"
         echo "[ScanCheck] Creating Python virtual environment..."
-        python -m venv "${VENV_DIR}"
+        python3 -m venv "${VENV_DIR}" 2>/dev/null || python -m venv "${VENV_DIR}"
     fi
 
     # shellcheck source=/dev/null
@@ -342,14 +343,20 @@ setup_python_env() {
     # Ensure setuptools/distutils
     python -c "import distutils" 2>/dev/null || pip install setuptools -q
 
-    if [ ! -f "${RUNTIME_DIR}/.python_bootstrap_done" ]; then
-        echo "[ScanCheck] Installing Python dependencies..."
+    if ! python -c "import qrcode, cv2, numpy" 2>/dev/null || [ ! -f "${RUNTIME_DIR}/.python_bootstrap_done" ]; then
+        echo "[ScanCheck] Installing/repairing Python dependencies..."
+        rm -f "${RUNTIME_DIR}/.python_bootstrap_done"
         pip install --upgrade pip -q
         if [ -f "${ROOT_DIR}/requirements.txt" ]; then
             pip install -r "${ROOT_DIR}/requirements.txt" -q
         fi
         python -c "import distutils" 2>/dev/null || pip install setuptools -q
-        touch "${RUNTIME_DIR}/.python_bootstrap_done"
+        if python -c "import qrcode, cv2, numpy" 2>/dev/null; then
+            touch "${RUNTIME_DIR}/.python_bootstrap_done"
+        else
+            echo "[ScanCheck] Python QR/scanner dependencies are incomplete after pip install."
+            exit 1
+        fi
     fi
 }
 

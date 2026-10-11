@@ -17,6 +17,21 @@ const GEMINI_OMR_MODELS = [
     'gemini-flash-lite-latest'
 ];
 
+// Wire values are uppercase per the generateContent ThinkingLevel enum.
+const THINKING_LEVELS = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'];
+
+// Output-token headroom reserved for thinking tokens. maxOutputTokens is a hard
+// cutoff on thinking + output combined, so a budget sized only for the JSON body
+// can truncate mid-response (finishReason MAX_TOKENS) and waste the call.
+const THINKING_HEADROOM_TOKENS = 2048;
+
+function supportsThinkingLevel(model) {
+    // thinkingLevel is rejected outright by pre-Gemini-3 models. The -latest
+    // aliases always track a current release, so they are treated as supported.
+    return String(model || '').startsWith('gemini-3')
+        || String(model || '').includes('gemini-flash-latest');
+}
+
 const DEFAULT_PROMPT_VERSION = 'omr-prompt-v1';
 
 function normalizeStrategyName(value) {
@@ -35,6 +50,27 @@ function normalizeVerificationMode(value) {
     const mode = String(value || '').trim().toLowerCase();
     if (['always', 'disabled'].includes(mode)) return mode;
     return 'uncertain';
+}
+
+function normalizeThinkingLevel(value) {
+    const level = String(value || '').trim().toUpperCase();
+    return THINKING_LEVELS.includes(level) ? level : 'MEDIUM';
+}
+
+// A section where most questions read "blank" is the signature of a misaligned
+// or truncated crop, not of a student who skipped the page. Those blanks get
+// flagged for review instead of being reported as a clean scan.
+function normalizeBlankReviewRate(value) {
+    const parsed = Number.parseFloat(value);
+    if (!Number.isFinite(parsed)) return 0.5;
+    return Math.max(0, Math.min(1, parsed));
+}
+
+// Contiguous blanks anchored to a section edge mean the crop cut off rows.
+function normalizeBlankRunThreshold(value) {
+    const parsed = Number.parseInt(String(value || ''), 10);
+    if (!Number.isFinite(parsed) || parsed < 2) return 5;
+    return parsed;
 }
 
 function normalizeGeminiModel(value) {
@@ -56,6 +92,9 @@ function getAiOmrConfig(env = process.env) {
         strategy: normalizeStrategyName(env.AI_OMR_STRATEGY || 'auto'),
         imageDetail: normalizeImageDetail(env.AI_OMR_IMAGE_DETAIL || 'medium'),
         verificationMode: normalizeVerificationMode(env.AI_OMR_VERIFICATION_MODE || 'uncertain'),
+        thinkingLevel: normalizeThinkingLevel(env.AI_OMR_THINKING_LEVEL || 'MEDIUM'),
+        blankReviewRate: normalizeBlankReviewRate(env.AI_OMR_BLANK_REVIEW_RATE),
+        blankRunThreshold: normalizeBlankRunThreshold(env.AI_OMR_BLANK_RUN_THRESHOLD),
         promptVersion: String(env.AI_OMR_PROMPT_VERSION || DEFAULT_PROMPT_VERSION).trim() || DEFAULT_PROMPT_VERSION
     };
 }
@@ -80,6 +119,12 @@ module.exports = {
     normalizeStrategyName,
     normalizeImageDetail,
     normalizeVerificationMode,
+    normalizeThinkingLevel,
+    normalizeBlankReviewRate,
+    normalizeBlankRunThreshold,
+    supportsThinkingLevel,
+    THINKING_HEADROOM_TOKENS,
+    THINKING_LEVELS,
     DEFAULT_PROMPT_VERSION,
     GEMINI_OMR_MODELS
 };

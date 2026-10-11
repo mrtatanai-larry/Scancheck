@@ -8435,11 +8435,20 @@ class ScanCheckApp {
     getCourseLogoForCourse(courseName) {
         const courseLogoMap = {
             'Bachelor of Science in Criminology': 'Bachelor of Science in Criminology.png',
+            'BS CRIMINOLOGY': 'Bachelor of Science in Criminology.png',
+            'BSCRIM': 'Bachelor of Science in Criminology.png',
             'Bachelor of Elementary Education': 'Bachelor of Elementary Education.png',
-            'Bachelor of Secondary Education': 'pcc.png',
+            'BEED': 'Bachelor of Elementary Education.png',
+            'BEEd': 'Bachelor of Elementary Education.png',
+            'Bachelor of Secondary Education': 'Bachelor of Elementary Education.png',
+            'BSED': 'Bachelor of Elementary Education.png',
+            'BSEd': 'Bachelor of Elementary Education.png',
             'Bachelor of Science in Hospitality Management': 'Bachelor of Science in Hospitality Management.png',
+            'BSHM': 'Bachelor of Science in Hospitality Management.png',
             'Bachelor of Science in Business Administration': 'Bachelor of Science in Business Administration.png',
-            'Bachelor of Science in Information Technology': 'Bachelor of Science in Information Technology.png'
+            'BSBA': 'Bachelor of Science in Business Administration.png',
+            'Bachelor of Science in Information Technology': 'Bachelor of Science in Information Technology.png',
+            'BSIT': 'Bachelor of Science in Information Technology.png'
         };
         return courseLogoMap[String(courseName || '').trim()] || 'pcc.png';
     }

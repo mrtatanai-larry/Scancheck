@@ -161,6 +161,7 @@ CREATE TABLE IF NOT EXISTS ai_omr_usage (
     input_tokens INTEGER,
     output_tokens INTEGER,
     total_tokens INTEGER,
+    thoughts_tokens INTEGER,
     processing_time_ms INTEGER,
     review_count INTEGER,
     success INTEGER DEFAULT 0,

@@ -467,16 +467,16 @@ class AnswerSheetGenerator {
         for (let i = 0; i < optionsCount; i++) {
             options += `
                 <span style="display: inline-flex; align-items: center; margin: 0; flex: 0 0 auto;">
-                    <span class="bubble" data-layout-choice="${optionLetters[i]}" style="width: 0.2in; height: 0.2in; border: 2px solid ${color}; border-radius: 50%; display: inline-block; box-sizing: border-box;"></span>
-                    <span class="bubble-label" style="font-size: 0.10in; font-weight: 900; font-family: Arial, sans-serif; margin-left: 0.03in; color: #000;">${optionLetters[i]}</span>
+                    <span class="bubble" data-layout-choice="${optionLetters[i]}" style="width: 0.145in; height: 0.145in; border: 1.6px solid ${color}; border-radius: 50%; display: inline-block; box-sizing: border-box;"></span>
+                    <span class="bubble-label" style="font-size: 0.085in; font-weight: 900; font-family: Arial, sans-serif; margin-left: 0.03in; color: #000;">${optionLetters[i]}</span>
                 </span>
             `;
         }
 
         return `
-            <div class="question-row" data-layout-question="${questionNumber}" style="display: flex; align-items: center; border-bottom: 0.7px solid #bbb; padding: 0.002in 0; flex: 1; width: 100%; min-height: 0.2in; box-sizing: border-box;">
-                <strong style="font-size: 0.11in; width: 0.34in; text-align: right; margin-right: 0.06in; color: #000; font-family: Arial, sans-serif;">${questionNumber}.</strong>
-                <div style="display: flex; justify-content: space-between; align-items: center; flex: 1; padding: 0 0.10in 0 0.04in; max-width: 100%; box-sizing: border-box; overflow: hidden;">
+            <div class="question-row" data-layout-question="${questionNumber}" style="display: flex; align-items: center; border-bottom: 0.7px solid #bbb; padding: 0.003in 0; flex: 1; width: 100%; min-height: 0.17in; box-sizing: border-box;">
+                <strong style="font-size: 0.09in; width: 0.30in; text-align: right; margin-right: 0.055in; color: #000; font-family: Arial, sans-serif;">${questionNumber}.</strong>
+                <div style="display: flex; justify-content: space-between; align-items: center; flex: 1; gap: 0.07in; padding: 0 0.12in 0 0.05in; max-width: 100%; box-sizing: border-box; overflow: hidden;">
                     ${options}
                 </div>
             </div>
@@ -983,7 +983,7 @@ class MultiSubjectAnswerSheetGenerator extends AnswerSheetGenerator {
         for (let row = 0; row < rows; row++) {
             const cells = [];
             for (let col = 0; col < columns; col++) {
-                const qNo = row * columns + col + 1;
+                const qNo = col * rows + row + 1;
                 const inactive = qNo > activeQuestions;
                 cells.push(`
                     <div style="flex: 1; display: flex; min-height: 0; box-sizing: border-box; ${col < columns - 1 ? 'border-right: 1px solid #ddd;' : ''}">
@@ -1014,17 +1014,17 @@ class MultiSubjectAnswerSheetGenerator extends AnswerSheetGenerator {
             for (let i = 0; i < optionsCount; i++) {
                 options += `
                     <span style="display: inline-flex; align-items: center; margin: 0; flex: 0 0 auto;">
-                        <span class="bubble" data-layout-choice="${optionLetters[i]}" style="width: 0.2in; height: 0.2in; border: 2px solid ${color}; border-radius: 50%; display: inline-block; box-sizing: border-box;"></span>
-                        <span class="bubble-label" style="font-size: 0.10in; font-weight: 900; font-family: Arial, sans-serif; margin-left: 0.03in; color: #000;">${optionLetters[i]}</span>
+                        <span class="bubble" data-layout-choice="${optionLetters[i]}" style="width: 0.132in; height: 0.132in; border: 1.45px solid ${color}; border-radius: 50%; display: inline-block; box-sizing: border-box;"></span>
+                        <span class="bubble-label" style="font-size: 0.074in; font-weight: 900; font-family: Arial, sans-serif; margin-left: 0.014in; color: #000;">${optionLetters[i]}</span>
                     </span>
                 `;
             }
         }
 
         return `
-            <div class="question-row" data-layout-question="${inactive ? '' : questionNumber}" data-layout-subject-code="${opts?.subjectCode || ''}" style="display: flex; align-items: center; flex: 1 1 0; width: 100%; min-height: 0; box-sizing: border-box; padding: 0.0015in 0.02in;">
-                <strong style="font-size: 0.095in; width: 0.22in; text-align: right; margin-right: 0.045in; color: #000; font-family: Arial, sans-serif;">${inactive ? '' : `${questionNumber}.`}</strong>
-                <div style="display: flex; justify-content: space-between; align-items: center; flex: 1; padding: 0 0.02in; max-width: 100%; box-sizing: border-box; overflow: hidden;">
+            <div class="question-row" data-layout-question="${inactive ? '' : questionNumber}" data-layout-subject-code="${opts?.subjectCode || ''}" style="display: flex; align-items: center; flex: 1 1 0; width: 100%; min-height: 0; box-sizing: border-box; padding: 0.001in 0.026in 0.001in 0.010in;">
+                <strong style="font-size: 0.078in; width: 0.18in; text-align: right; margin-right: 0.016in; color: #000; font-family: Arial, sans-serif;">${inactive ? '' : `${questionNumber}.`}</strong>
+                <div style="display: flex; justify-content: space-between; align-items: center; flex: 1; gap: 0.006in; padding: 0; max-width: 100%; box-sizing: border-box; overflow: hidden;">
                     ${options}
                 </div>
             </div>

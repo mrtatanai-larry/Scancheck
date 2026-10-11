@@ -1,6 +1,7 @@
 const { GoogleGenAI } = require('@google/genai');
 const { omrResultSchema, topFieldsResultSchema } = require('../schemas/omrResultSchema');
 const { buildSectionPrompt, buildVerificationPrompt, buildTopFieldsPrompt } = require('../prompts');
+const { supportsThinkingLevel, THINKING_HEADROOM_TOKENS } = require('../config');
 
 class AiOmrProviderError extends Error {
     constructor(code, message, details = null) {
@@ -84,10 +85,12 @@ function extractUsageMetadata(response) {
     const inputTokens = Number(usage.promptTokenCount ?? usage.prompt_token_count);
     const outputTokens = Number(usage.candidatesTokenCount ?? usage.candidates_token_count);
     const totalTokens = Number(usage.totalTokenCount ?? usage.total_token_count);
+    const thoughtsTokens = Number(usage.thoughtsTokenCount ?? usage.thoughts_token_count);
     return {
         inputTokens: Number.isFinite(inputTokens) ? inputTokens : null,
         outputTokens: Number.isFinite(outputTokens) ? outputTokens : null,
-        totalTokens: Number.isFinite(totalTokens) ? totalTokens : null
+        totalTokens: Number.isFinite(totalTokens) ? totalTokens : null,
+        thoughtsTokens: Number.isFinite(thoughtsTokens) ? thoughtsTokens : null
     };
 }
 
@@ -95,6 +98,20 @@ class GeminiProvider {
     constructor(config) {
         this.config = config;
         this.client = new GoogleGenAI({ apiKey: config.apiKey });
+    }
+
+    // Reading bubble fill is a perception task, not a reasoning one. Thinking stays
+    // on (Gemini 3 cannot disable it) but LOW avoids paying for reasoning we do not use.
+    buildThinkingConfig() {
+        if (!supportsThinkingLevel(this.config.model)) return {};
+        const level = this.config.thinkingLevel || 'LOW';
+        return { thinkingConfig: { thinkingLevel: level, includeThoughts: false } };
+    }
+
+    // maxOutputTokens caps thinking + output together, so the JSON body alone must
+    // not be sized as the whole budget or the response can truncate mid-object.
+    buildOutputTokenBudget(bodyTokens) {
+        return Math.max(4096, Number(bodyTokens) || 0) + THINKING_HEADROOM_TOKENS;
     }
 
     async generateOmrResult({ imageBuffer, mimeType, questions, subjects = [], questionMappings = [], verificationQuestion = null }) {
@@ -129,9 +146,10 @@ class GeminiProvider {
                 temperature: 0,
                 topP: 0.1,
                 candidateCount: 1,
-                maxOutputTokens: Math.max(4096, (questions?.length || 1) * 220),
+                maxOutputTokens: this.buildOutputTokenBudget((questions?.length || 1) * 220),
                 responseMimeType: 'application/json',
-                responseJsonSchema: omrResultSchema
+                responseJsonSchema: omrResultSchema,
+                ...this.buildThinkingConfig()
             }
         };
 
@@ -187,9 +205,10 @@ class GeminiProvider {
                 temperature: 0,
                 topP: 0.1,
                 candidateCount: 1,
-                maxOutputTokens: 2048,
+                maxOutputTokens: this.buildOutputTokenBudget(2048),
                 responseMimeType: 'application/json',
-                responseJsonSchema: topFieldsResultSchema
+                responseJsonSchema: topFieldsResultSchema,
+                ...this.buildThinkingConfig()
             }
         };
 

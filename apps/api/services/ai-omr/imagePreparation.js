@@ -113,6 +113,25 @@ function isUsablePythonCommand(commandPath) {
     }
 }
 
+// Registration is only trustworthy when it was VERIFIED against the layout
+// registration anchors. A document_quad / paper_mask / full_frame warp is an
+// unverified geometric guess: observed failures include a landscape quad being
+// stretched onto the portrait sheet grid, which shifts every crop and silently
+// blanks whole row bands. Only a confirmed homography counts as trusted.
+function registrationFailureReason(metadata = {}) {
+    if (metadata.sourceAnchorAlignment?.active) return null;
+    if (metadata.anchorRefinement?.active) return null;
+    const mode = String(metadata.mode || 'unknown');
+    const refinementReason = metadata.anchorRefinement?.reason
+        || metadata.sourceAnchorAlignment?.reason
+        || null;
+    return refinementReason ? `${mode}:${refinementReason}` : `${mode}:unverified`;
+}
+
+function isRegistrationTrusted(metadata = {}) {
+    return registrationFailureReason(metadata) === null;
+}
+
 function preparePageImage(imageBuffer, layout = {}, runtimePaths = {}) {
     const sheetWidth = Math.round(Number(layout.sheetSize?.width) || Number(layout.sheet_size?.width) || 0);
     const sheetHeight = Math.round(Number(layout.sheetSize?.height) || Number(layout.sheet_size?.height) || 0);
@@ -121,7 +140,8 @@ function preparePageImage(imageBuffer, layout = {}, runtimePaths = {}) {
             buffer: imageBuffer,
             mimeType: 'image/jpeg',
             mode: 'original_no_sheet_size',
-            usedWorker: false
+            usedWorker: false,
+            registrationTrusted: false
         });
     }
 
@@ -141,14 +161,14 @@ function preparePageImage(imageBuffer, layout = {}, runtimePaths = {}) {
             stderr += chunk.toString();
         });
         child.on('error', () => {
-            resolve({ buffer: imageBuffer, mimeType: 'image/jpeg', mode: 'original_page_prep_error', usedWorker: false });
+            resolve({ buffer: imageBuffer, mimeType: 'image/jpeg', mode: 'original_page_prep_error', usedWorker: false, registrationTrusted: false });
         });
         child.stdin.on('error', () => {
             // The worker may exit early if OpenCV is unavailable or the image is invalid.
         });
         child.on('close', (code) => {
             if (code !== 0 || stdout.length === 0) {
-                resolve({ buffer: imageBuffer, mimeType: 'image/jpeg', mode: 'original_page_prep_failed', usedWorker: false });
+                resolve({ buffer: imageBuffer, mimeType: 'image/jpeg', mode: 'original_page_prep_failed', usedWorker: false, registrationTrusted: false });
                 return;
             }
             let metadata = {};
@@ -163,6 +183,9 @@ function preparePageImage(imageBuffer, layout = {}, runtimePaths = {}) {
                 mode: metadata.mode || 'document_quad',
                 quad: metadata.quad || null,
                 anchorRefinement: metadata.anchorRefinement || null,
+                sourceAnchorAlignment: metadata.sourceAnchorAlignment || null,
+                registrationTrusted: isRegistrationTrusted(metadata),
+                registrationFailureReason: registrationFailureReason(metadata),
                 width: metadata.width || sheetWidth,
                 height: metadata.height || sheetHeight,
                 usedWorker: true

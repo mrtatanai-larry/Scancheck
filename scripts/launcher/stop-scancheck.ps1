@@ -1,7 +1,18 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$ScriptDir = (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$ScriptDir = $null
+if ($PSScriptRoot) {
+    $ScriptDir = $PSScriptRoot
+} elseif ($env:SCANCHECK_PS_SCRIPT -and (Test-Path $env:SCANCHECK_PS_SCRIPT)) {
+    $ScriptDir = Split-Path -Parent $env:SCANCHECK_PS_SCRIPT
+} else {
+    try {
+        $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+    } catch {
+        $ScriptDir = Get-Location
+    }
+}
 $RootDir = (Resolve-Path (Join-Path $ScriptDir "..\..")).ProviderPath
 $RuntimeDir = Join-Path $RootDir ".runtime"
 $PidFile = Join-Path $RuntimeDir "scancheck.pid"

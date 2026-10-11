@@ -126,11 +126,131 @@ def _parse_layout_anchors(raw):
     return anchors
 
 
-def _detect_anchor_at(gray, anchor):
+def _detect_source_anchor_candidates(image):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    _, dark = cv2.threshold(gray, 90, 255, cv2.THRESH_BINARY_INV)
+    dark = cv2.morphologyEx(dark, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8), iterations=1)
+    contours, _ = cv2.findContours(dark, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    h, w = image.shape[:2]
+    min_side = float(min(w, h))
+    min_dim = max(4.0, min_side * 0.004)
+    max_dim = max(24.0, min_side * 0.085)
+    candidates = []
+
+    for contour in contours:
+        area = float(cv2.contourArea(contour))
+        if area <= 0:
+            continue
+        x, y, bw, bh = cv2.boundingRect(contour)
+        if bw < min_dim or bh < min_dim or bw > max_dim or bh > max_dim:
+            continue
+        # Printed registration marks blur and skew on phone photos, so keep a
+        # wider band of shapes than a clean scan would need. RANSAC consensus in
+        # _fit_anchor_homography rejects spurious matches downstream.
+        aspect = bw / float(bh)
+        if aspect < 0.45 or aspect > 2.2:
+            continue
+        fill = area / float(bw * bh)
+        if fill < 0.28:
+            continue
+        candidates.append({
+            "center": [float(x + bw / 2.0), float(y + bh / 2.0)],
+            "bbox": [int(x), int(y), int(bw), int(bh)],
+            "area": round(area, 3),
+            "fill": round(fill, 3)
+        })
+
+    return candidates
+
+
+def _match_source_anchors_to_layout(candidates, anchors, image_shape, layout_width, layout_height, tolerance=1.0):
+    if len(candidates) < 3 or len(anchors) < 3:
+        return []
+
+    centers = np.asarray([candidate["center"] for candidate in candidates], dtype=np.float32)
+    min_x, min_y = np.min(centers, axis=0)
+    max_x, max_y = np.max(centers, axis=0)
+    source_w = max(1.0, float(max_x - min_x))
+    source_h = max(1.0, float(max_y - min_y))
+    h, w = image_shape[:2]
+    max_distance = max(28.0, min(w, h) * 0.16) * max(1.0, float(tolerance))
+
+    matches = []
+    used = set()
+    ordered_anchors = sorted(
+        anchors,
+        key=lambda anchor: 0 if anchor["name"] in {"top-left", "top-right", "bottom-left", "bottom-right"} else 1
+    )
+
+    for anchor in ordered_anchors:
+        expected_ratio_x = float(anchor["x"]) / max(1.0, float(layout_width))
+        expected_ratio_y = float(anchor["y"]) / max(1.0, float(layout_height))
+        estimate = np.array([
+            min_x + expected_ratio_x * source_w,
+            min_y + expected_ratio_y * source_h
+        ], dtype=np.float32)
+
+        best_index = None
+        best_distance = float("inf")
+        for index, candidate in enumerate(candidates):
+            if index in used:
+                continue
+            distance = float(np.linalg.norm(np.asarray(candidate["center"], dtype=np.float32) - estimate))
+            if distance < best_distance:
+                best_distance = distance
+                best_index = index
+
+        if best_index is not None and best_distance <= max_distance:
+            used.add(best_index)
+            candidate = candidates[best_index]
+            matches.append({
+                "name": anchor["name"],
+                "observed": candidate["center"],
+                "expected": [float(anchor["x"]), float(anchor["y"])],
+                "bbox": candidate["bbox"],
+                "dist": round(best_distance, 3)
+            })
+
+    return matches
+
+
+def warp_from_source_registration_anchors(image, anchors, width, height):
+    candidates = _detect_source_anchor_candidates(image)
+    attempts = []
+    for tolerance in ANCHOR_TOLERANCE_LADDER:
+        matches = _match_source_anchors_to_layout(candidates, anchors, image.shape, width, height, tolerance)
+        H, validation = _fit_anchor_homography(matches)
+        attempts.append({
+            "tolerance": tolerance,
+            "matchCount": len(matches),
+            "reason": validation.get("reason"),
+            "rmsError": validation.get("rmsError")
+        })
+        if H is None:
+            continue
+        warped = cv2.warpPerspective(image, H, (width, height))
+        validation["active"] = True
+        validation["tolerance"] = tolerance
+        validation["detectedCount"] = len(candidates)
+        validation["attempts"] = attempts
+        validation["matches"] = matches
+        return warped, validation
+
+    return None, {
+        "active": False,
+        "detectedCount": len(candidates),
+        "attempts": attempts,
+        "reason": "no_source_tolerance_matched"
+    }
+
+
+def _detect_anchor_at(gray, anchor, tolerance=1.0):
     ex = float(anchor["x"])
     ey = float(anchor["y"])
     radius = float(anchor.get("radius") or 10.5)
-    search = int(max(42, radius * 5.5))
+    scale = max(1.0, float(tolerance))
+    search = int(max(42, radius * 5.5) * scale)
     h, w = gray.shape[:2]
     x1 = max(0, int(round(ex - search)))
     y1 = max(0, int(round(ey - search)))
@@ -178,14 +298,78 @@ def _detect_anchor_at(gray, anchor):
     if best is None:
         return None
 
-    # A registration anchor may be missing after a loose page crop. Do not let
-    # nearby text, page edges, or background texture become a control point.
-    max_dist = max(30.0, radius * 3.0)
+    # A registration anchor may sit further from its nominal position when the
+    # initial page quad is imperfect. Loosening this gate is safe because the
+    # caller validates the resulting homography globally via RANSAC inlier
+    # reprojection error, which is far stronger than a per-anchor distance cap.
+    max_dist = max(30.0, radius * 3.0) * scale
     if float(best["dist"]) > max_dist:
         best["rejected"] = True
         best["rejectionReason"] = "too_far_from_expected"
+        best["maxDistance"] = round(float(max_dist), 3)
         return None
     return best
+
+
+def _fit_anchor_homography(detections, min_inliers=4, ransac_threshold=6.0, max_rms_error=8.0):
+    """Fit observed->expected homography and validate it globally.
+
+    Individual anchor distances are unreliable on real phone photos, so instead
+    of rejecting anchors that sit far from their nominal spot we let RANSAC
+    find the consensus and then validate the fit by reprojection error. A bad
+    quad produces scattered anchors with high RMS and is rejected here; a merely
+    offset quad still yields a tight, low-error fit and is accepted.
+
+    OpenCV requires at least 4 correspondences for a homography, so 4 is also
+    the hard floor for min_inliers.
+    """
+    # cv2.findHomography requires >= 4 points; never call it with fewer.
+    min_inliers = max(4, int(min_inliers))
+    if not detections or len(detections) < min_inliers:
+        return None, {"reason": "insufficient_detections", "detectedCount": len(detections or [])}
+
+    src = np.asarray([item["observed"] for item in detections], dtype=np.float32)
+    dst = np.asarray([item["expected"] for item in detections], dtype=np.float32)
+    H, mask = cv2.findHomography(src, dst, cv2.RANSAC, ransac_threshold)
+    if H is None:
+        return None, {"reason": "homography_failed", "detectedCount": len(detections)}
+
+    inlier_mask = mask.ravel().astype(bool) if mask is not None else np.ones(len(detections), dtype=bool)
+    inlier_count = int(np.count_nonzero(inlier_mask))
+    if inlier_count < min_inliers:
+        return None, {
+            "reason": "insufficient_inliers",
+            "detectedCount": len(detections),
+            "inlierCount": inlier_count
+        }
+
+    projected = cv2.perspectiveTransform(src.reshape(-1, 1, 2), H).reshape(-1, 2)
+    errors = np.linalg.norm(projected - dst, axis=1)
+    inlier_errors = errors[inlier_mask]
+    rms_error = float(np.sqrt(np.mean(np.square(inlier_errors))))
+    max_error = float(np.max(inlier_errors))
+    if rms_error > max_rms_error:
+        return None, {
+            "reason": "reprojection_error_too_high",
+            "detectedCount": len(detections),
+            "inlierCount": inlier_count,
+            "rmsError": round(rms_error, 3),
+            "maxError": round(max_error, 3)
+        }
+
+    return H, {
+        "reason": None,
+        "detectedCount": len(detections),
+        "inlierCount": inlier_count,
+        "rmsError": round(rms_error, 3),
+        "maxError": round(max_error, 3),
+        "matches": detections
+    }
+
+
+# Progressive relaxation. Tight enough first to avoid matching stray text,
+# loose enough to recover real anchors on imperfect photos.
+ANCHOR_TOLERANCE_LADDER = (1.0, 1.75, 2.5, 3.5)
 
 
 def refine_with_registration_anchors(warped, anchors):
@@ -193,63 +377,33 @@ def refine_with_registration_anchors(warped, anchors):
         return warped, {"active": False, "detectedCount": 0}
 
     gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-    detections = []
-    for anchor in anchors:
-        detected = _detect_anchor_at(gray, anchor)
-        if detected is not None:
-            detections.append(detected)
-
-    if len(detections) < 5:
-        return warped, {
-            "active": False,
+    attempts = []
+    for tolerance in ANCHOR_TOLERANCE_LADDER:
+        detections = []
+        for anchor in anchors:
+            detected = _detect_anchor_at(gray, anchor, tolerance)
+            if detected is not None:
+                detections.append(detected)
+        H, validation = _fit_anchor_homography(detections)
+        attempts.append({
+            "tolerance": tolerance,
             "detectedCount": len(detections),
-            "anchors": detections,
-            "reason": "insufficient_anchors"
-        }
+            "reason": validation.get("reason"),
+            "rmsError": validation.get("rmsError")
+        })
+        if H is None:
+            continue
+        refined = cv2.warpPerspective(warped, H, (warped.shape[1], warped.shape[0]))
+        validation["active"] = True
+        validation["tolerance"] = tolerance
+        validation["attempts"] = attempts
+        validation["anchors"] = detections
+        return refined, validation
 
-    src = np.array([item["observed"] for item in detections], dtype=np.float32)
-    dst = np.array([item["expected"] for item in detections], dtype=np.float32)
-    H, mask = cv2.findHomography(src, dst, cv2.RANSAC, 5.0)
-    if H is None:
-        return warped, {
-            "active": False,
-            "detectedCount": len(detections),
-            "anchors": detections,
-            "reason": "homography_failed"
-        }
-
-    projected = cv2.perspectiveTransform(src.reshape(-1, 1, 2), H).reshape(-1, 2)
-    errors = np.linalg.norm(projected - dst, axis=1)
-    inlier_mask = mask.ravel().astype(bool) if mask is not None else np.ones(len(detections), dtype=bool)
-    inlier_count = int(np.count_nonzero(inlier_mask))
-    if inlier_count < 5:
-        return warped, {
-            "active": False,
-            "detectedCount": len(detections),
-            "anchors": detections,
-            "reason": "insufficient_inliers"
-        }
-    prefit_distances = np.array([float(item.get("dist", 9999.0)) for item in detections], dtype=np.float32)
-    inlier_prefit = prefit_distances[inlier_mask]
-    if float(np.mean(inlier_prefit)) > 18.0 or float(np.max(inlier_prefit)) > 32.0:
-        return warped, {
-            "active": False,
-            "detectedCount": len(detections),
-            "inlierCount": inlier_count,
-            "anchors": detections,
-            "reason": "anchors_too_far_from_expected",
-            "meanObservedDistance": round(float(np.mean(inlier_prefit)), 3),
-            "maxObservedDistance": round(float(np.max(inlier_prefit)), 3)
-        }
-
-    refined = cv2.warpPerspective(warped, H, (warped.shape[1], warped.shape[0]))
-    return refined, {
-        "active": True,
-        "detectedCount": len(detections),
-        "inlierCount": inlier_count,
-        "meanError": round(float(np.mean(errors[inlier_mask])), 3),
-        "maxError": round(float(np.max(errors[inlier_mask])), 3),
-        "anchors": detections
+    return warped, {
+        "active": False,
+        "attempts": attempts,
+        "reason": "no_tolerance_matched"
     }
 
 
@@ -265,10 +419,16 @@ def main():
     if image is None:
         raise SystemExit("invalid image")
 
-    quad, mode = detect_document(image)
-    dst = np.array([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]], dtype="float32")
-    matrix = cv2.getPerspectiveTransform(quad, dst)
-    warped = cv2.warpPerspective(image, matrix, (width, height))
+    source_anchor_info = {"active": False, "reason": "not_attempted"}
+    warped, source_anchor_info = warp_from_source_registration_anchors(image, anchors, width, height)
+    quad = None
+    if warped is not None:
+        mode = "source_registration_anchors"
+    else:
+        quad, mode = detect_document(image)
+        dst = np.array([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]], dtype="float32")
+        matrix = cv2.getPerspectiveTransform(quad, dst)
+        warped = cv2.warpPerspective(image, matrix, (width, height))
     warped, anchor_info = refine_with_registration_anchors(warped, anchors)
     ok, encoded = cv2.imencode(".jpg", warped, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
     if not ok:
@@ -277,9 +437,10 @@ def main():
         mode = f"{mode}_anchor_refined"
     sys.stderr.write(json.dumps({
         "mode": mode,
-        "quad": quad.tolist(),
+        "quad": quad.tolist() if quad is not None else None,
         "width": width,
         "height": height,
+        "sourceAnchorAlignment": source_anchor_info,
         "anchorRefinement": anchor_info
     }) + "\n")
     sys.stdout.buffer.write(encoded.tobytes())
