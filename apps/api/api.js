@@ -2134,6 +2134,152 @@ router.post('/auth/refresh', (req, res) => {
 
 // --- PROTECTED ROUTES ---
 
+// --- COURSE LOGOS ---
+// Defaults are the tracked files in apps/web/images. An override is a user
+// upload in .runtime/courselogos that replaces the default for this install
+// only, so swapping a logo never dirties the repository with a multi-megabyte
+// binary. Removing an override restores the course's own default; the default
+// files themselves are never writable through this API.
+
+const COURSE_LOGO_MAX_BYTES = 12 * 1024 * 1024;
+
+function courseLogoDefaultPath(filename) {
+    const safe = String(filename || '').trim();
+    // Reject anything that could escape the images directory.
+    if (!safe || safe.includes('/') || safe.includes('\\') || safe.includes('..')) return null;
+    return path.join(runtimePaths.webRoot, 'images', safe);
+}
+
+function courseLogoOverridePath(code) {
+    const safe = String(code || '').trim();
+    if (!safe || !/^[A-Za-z0-9_-]+$/.test(safe)) return null;
+    return path.join(runtimePaths.courseLogosDir, `${safe}.png`);
+}
+
+function isPngBuffer(buffer) {
+    // PNG magic number. Cheap enough to reject anything that is not an image
+    // before it is written to disk.
+    return buffer.length > 8
+        && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47
+        && buffer[4] === 0x0d && buffer[5] === 0x0a && buffer[6] === 0x1a && buffer[7] === 0x0a;
+}
+
+function decodeLogoDataUrl(dataUrl) {
+    const match = String(dataUrl || '').match(/^data:image\/png;base64,([A-Za-z0-9+/=]+)$/);
+    if (!match) {
+        throw new Error('Logo must be a PNG supplied as a base64 data URL.');
+    }
+    const buffer = Buffer.from(match[1], 'base64');
+    if (buffer.length === 0) {
+        throw new Error('Uploaded logo was empty.');
+    }
+    if (buffer.length > COURSE_LOGO_MAX_BYTES) {
+        throw new Error(`Logo exceeds the ${Math.round(COURSE_LOGO_MAX_BYTES / 1048576)}MB limit.`);
+    }
+    if (!isPngBuffer(buffer)) {
+        throw new Error('Uploaded file is not a valid PNG image.');
+    }
+    return buffer;
+}
+
+function describeCourseLogo(course) {
+    const overridePath = course.overrideLogo ? courseLogoOverridePath(course.code) : null;
+    const hasOverride = Boolean(overridePath && fs.existsSync(overridePath));
+    const defaultPath = course.defaultLogo ? courseLogoDefaultPath(course.defaultLogo) : null;
+    const hasDefault = Boolean(defaultPath && fs.existsSync(defaultPath));
+
+    const source = hasOverride ? 'override' : (hasDefault ? 'default' : 'none');
+    const url = hasOverride
+        ? `/courselogos/${course.code}.png`
+        : (hasDefault ? `images/${course.defaultLogo}` : null);
+
+    return {
+        code: course.code,
+        name: course.name,
+        aliases: course.aliases,
+        logoUrl: url,
+        logoSource: source,
+        hasOverride,
+        hasDefault,
+        logoScale: course.logoScale,
+        defaultLogo: course.defaultLogo,
+        overrideLogo: hasOverride ? `${course.code}.png` : null
+    };
+}
+
+router.get('/courses', authenticateToken, async (_req, res) => {
+    try {
+        const courses = await database.getCourses();
+        return res.json({
+            success: true,
+            defaultDirectory: path.join(runtimePaths.webRoot, 'images'),
+            overrideDirectory: runtimePaths.courseLogosDir,
+            courses: courses.map(describeCourseLogo)
+        });
+    } catch (error) {
+        console.error('[Courses] list failed:', error.message);
+        return res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+router.post('/courses/logo', authenticateToken, async (req, res) => {
+    try {
+        const code = String(req.body?.code || '').trim();
+        const course = await database.getCourseByInput(code);
+        if (!course) {
+            return res.status(404).json({ success: false, error: `Unknown course: ${code}` });
+        }
+
+        const buffer = decodeLogoDataUrl(req.body?.dataUrl);
+        const target = courseLogoOverridePath(course.code);
+        if (!target) {
+            return res.status(400).json({ success: false, error: 'Invalid course code.' });
+        }
+
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.writeFileSync(target, buffer);
+
+        await database.run('UPDATE courses SET override_logo = ?, updated_at = ? WHERE code = ?', [
+            `${course.code}.png`,
+            new Date().toISOString(),
+            course.code
+        ]);
+
+        const [updated] = (await database.getCourses()).filter((item) => item.code === course.code);
+        return res.json({ success: true, course: describeCourseLogo(updated) });
+    } catch (error) {
+        console.error('[Courses] replace failed:', error.message);
+        return res.status(400).json({ success: false, error: error.message });
+    }
+});
+
+// Removes the override only. The course falls back to its own default logo;
+// the shipped file in apps/web/images is never touched.
+router.delete('/courses/logo/:code', authenticateToken, async (req, res) => {
+    try {
+        const code = String(req.params.code || '').trim();
+        const course = await database.getCourseByInput(code);
+        if (!course) {
+            return res.status(404).json({ success: false, error: `Unknown course: ${code}` });
+        }
+
+        const target = courseLogoOverridePath(course.code);
+        if (target && fs.existsSync(target)) {
+            fs.unlinkSync(target);
+        }
+        await database.run('UPDATE courses SET override_logo = NULL, updated_at = ? WHERE code = ?', [
+            new Date().toISOString(),
+            course.code
+        ]);
+
+        const [updated] = (await database.getCourses()).filter((item) => item.code === course.code);
+        return res.json({ success: true, course: describeCourseLogo(updated) });
+    } catch (error) {
+        console.error('[Courses] remove failed:', error.message);
+        return res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // Quiz endpoints
 router.get('/quizzes', authenticateToken, async (req, res) => {
     try {

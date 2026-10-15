@@ -107,6 +107,9 @@ app.use('/vendor/chart.js', express.static(path.join(paths.apiRoot, 'node_module
 app.use('/vendor/html2canvas', express.static(path.join(paths.apiRoot, 'node_modules', 'html2canvas', 'dist')));
 app.use(express.static(paths.webRoot, { index: false }));
 app.use('/uploads', express.static(paths.uploadsDir));
+// Course logo overrides. Served separately from /images because these live in
+// .runtime (gitignored) while the shipped defaults stay in apps/web/images.
+app.use('/courselogos', express.static(paths.courseLogosDir));
 
 app.use('/api', api);
 

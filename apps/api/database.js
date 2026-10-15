@@ -325,6 +325,22 @@ class Database {
                     verification_mode TEXT,
                     prompt_version TEXT,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )`,
+
+                // default_logo points at a file shipped in apps/web/images.
+                // override_logo points at .runtime/courselogos and is NULL until a
+                // user uploads a replacement; it is intentionally not tracked in
+                // git so replacing a logo never dirties the repository.
+                `CREATE TABLE IF NOT EXISTS courses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    code TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    aliases TEXT,
+                    default_logo TEXT,
+                    override_logo TEXT,
+                    logo_scale REAL DEFAULT 1,
+                    sort_order INTEGER DEFAULT 0,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )`
             ];
 
@@ -519,6 +535,119 @@ class Database {
         }
 
         await this.verifyMigrations();
+        await this.seedCourses();
+    }
+
+    // The alias list reproduces the mapping that used to be hardcoded in
+    // getCourseLogoForCourse(). It is seeded rather than migrated so a fresh
+    // install and an existing install converge on the same rows, and so adding
+    // a course later is a data change instead of a code change.
+    async seedCourses() {
+        const seeds = [
+            {
+                code: 'BSCRIM',
+                name: 'Bachelor of Science in Criminology',
+                default_logo: 'Bachelor of Science in Criminology.png',
+                logo_scale: 1,
+                sort_order: 10,
+                aliases: ['Bachelor of Science in Criminology', 'BS CRIMINOLOGY', 'BSCRIM']
+            },
+            {
+                code: 'BEED',
+                name: 'Bachelor of Elementary Education',
+                default_logo: 'Bachelor of Elementary Education.png',
+                logo_scale: 1,
+                sort_order: 20,
+                aliases: [
+                    'Bachelor of Elementary Education',
+                    'BEED',
+                    'BEEd',
+                    // Historically mapped to the Elementary Education logo; kept
+                    // as-is so existing sheets render unchanged.
+                    'Bachelor of Secondary Education',
+                    'BSED',
+                    'BSEd'
+                ]
+            },
+            {
+                code: 'BSHM',
+                name: 'Bachelor of Science in Hospitality Management',
+                default_logo: 'Bachelor of Science in Hospitality Management.png',
+                // Emblem artwork occupies roughly 78% of its PNG canvas.
+                logo_scale: 1.27,
+                sort_order: 30,
+                aliases: ['Bachelor of Science in Hospitality Management', 'BSHM']
+            },
+            {
+                code: 'BSBA',
+                name: 'Bachelor of Science in Business Administration',
+                default_logo: 'Bachelor of Science in Business Administration.png',
+                logo_scale: 1,
+                sort_order: 40,
+                aliases: ['Bachelor of Science in Business Administration', 'BSBA']
+            },
+            {
+                code: 'BSIT',
+                name: 'Bachelor of Science in Information Technology',
+                default_logo: 'Bachelor of Science in Information Technology.png',
+                logo_scale: 1,
+                sort_order: 50,
+                aliases: ['Bachelor of Science in Information Technology', 'BSIT']
+            }
+        ];
+
+        for (const seed of seeds) {
+            const existing = await this.query('SELECT id FROM courses WHERE code = ?', [seed.code]);
+            if (existing.length > 0) continue;
+            await this.run(
+                `INSERT INTO courses (code, name, aliases, default_logo, override_logo, logo_scale, sort_order)
+                 VALUES (?, ?, ?, ?, NULL, ?, ?)`,
+                [seed.code, seed.name, JSON.stringify(seed.aliases), seed.default_logo, seed.logo_scale, seed.sort_order]
+            );
+        }
+    }
+
+    // Synchronous lookup used while rendering an answer sheet. Kept as a plain
+    // query result so sheet generation does not have to become async.
+    async getCourses() {
+        const rows = await this.query(
+            `SELECT code, name, aliases, default_logo, override_logo, logo_scale, sort_order
+             FROM courses ORDER BY sort_order, code`
+        );
+        if (!Array.isArray(rows)) return [];
+        return rows.map((row) => {
+            let aliases = [];
+            try {
+                const parsed = JSON.parse(row.aliases || '[]');
+                if (Array.isArray(parsed)) aliases = parsed.filter((value) => typeof value === 'string');
+            } catch (_error) {
+                aliases = [];
+            }
+            return {
+                code: row.code,
+                name: row.name,
+                aliases,
+                defaultLogo: row.default_logo || null,
+                overrideLogo: row.override_logo || null,
+                logoScale: Number.isFinite(Number(row.logo_scale)) ? Number(row.logo_scale) : 1,
+                sortOrder: Number(row.sort_order) || 0
+            };
+        });
+    }
+
+    async getCourseByInput(courseInput) {
+        const key = String(courseInput || '').trim();
+        if (!key) return null;
+        const courses = await this.getCourses();
+        if (!Array.isArray(courses) || courses.length === 0) return null;
+        for (const course of courses) {
+            if (course.code === key || course.name === key) return course;
+        }
+        const lowered = key.toLowerCase();
+        for (const course of courses) {
+            if (course.aliases.some((alias) => alias.toLowerCase() === lowered)) return course;
+        }
+        return null;
     }
 
     // A migration that silently fails leaves the app running against a schema
@@ -528,6 +657,7 @@ class Database {
     async verifyMigrations() {
         const expected = {
             ai_omr_usage: ['thoughts_tokens'],
+            courses: ['name', 'aliases', 'default_logo', 'override_logo', 'logo_scale', 'sort_order'],
             quizzes: ['format', 'subject_config', 'archived', 'subject_id'],
             answer_keys: ['subject_id'],
             subject_records: ['entry_type', 'residency_type', 'special_equity_group', 'room_no', 'seat_no', 'exam_date_time'],

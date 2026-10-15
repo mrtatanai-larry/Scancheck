@@ -171,9 +171,42 @@ class AnswerSheetGenerator {
         // Both header logos share LOGO_SIZE_IN so they read at equal weight.
         // The previous pair (0.58in left / 0.45in right) left the course logo
         // 22% smaller despite a comment claiming they were forced equal.
-        const rightLogoSrc = config.courseLogo ? `images/${config.courseLogo}` : 'images/pcc.png';
-        const rightLogoStyle = config.courseLogo ? 'filter: contrast(1.1);' : 'filter: grayscale(100%);';
+        //
+        // pcc.png is deliberately NOT a fallback here. It is the college seal and
+        // belongs in the left slot only; the right slot is reserved for the course
+        // logo. When no course logo resolves we still occupy the same box with a
+        // placeholder, because the right column is a fixed 2.78in flex row with
+        // justify-content: flex-end - dropping the element would slide the QR box
+        // left by (logo + gap), invalidating the qrArea coordinates stored in
+        // every existing layout and forcing a reprint.
+        // Overrides resolve to an absolute /courselogos/... path while defaults
+        // stay relative to images/. resolveUrl normalises both for cross-host and
+        // file:// launches, the same way the QR endpoint below is handled.
+        const rightLogoSrc = config.courseLogo
+            ? (window.scanCheckConfig ? window.scanCheckConfig.resolveUrl(String(config.courseLogo)) : String(config.courseLogo))
+            : '';
         const rightLogoSize = LOGO_SIZE_IN * (Number(config.courseLogoScale) || 1);
+        const rightLogoMarkup = rightLogoSrc
+            ? `<img src="${rightLogoSrc}"
+                         style="
+                            width: ${rightLogoSize}in;
+                            height: ${rightLogoSize}in;
+                            object-fit: contain;
+                            display: block;
+                            flex: 0 0 auto;
+                            filter: contrast(1.1);
+                         "
+                         alt="Course Logo">`
+            : `<div style="
+                            width: ${rightLogoSize}in;
+                            height: ${rightLogoSize}in;
+                            flex: 0 0 auto;
+                            box-sizing: border-box;
+                            border: 1px dashed #b8c0c8;
+                            border-radius: 4px;
+                            background: #f8f9fa;
+                         "
+                         title="No course logo configured"></div>`;
         
         let qrImg = `
             <div style="font-size:0.06in; font-weight:800; letter-spacing:0.5px; line-height:1.3; color: #333;">[ QR ]</div>
@@ -268,16 +301,7 @@ class AnswerSheetGenerator {
                     flex-shrink: 0;
                     white-space: nowrap;
                 ">
-                    <img src="${rightLogoSrc}" 
-                        style="
-                            width: ${rightLogoSize}in;
-                            height: ${rightLogoSize}in;
-                            object-fit: contain;
-                            display: block;
-                            flex: 0 0 auto;
-                            ${rightLogoStyle}
-                        " 
-                        alt="Right Logo">
+                    ${rightLogoMarkup}
                     <div style="
                         display: flex;
                         flex-direction: column;

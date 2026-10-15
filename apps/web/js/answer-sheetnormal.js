@@ -159,9 +159,36 @@ class NormalAnswerSheetGenerator {
         
         const examId = String(config.studentData?.examId || config.examId || '').trim();
         
-        const rightLogoSrc = config.courseLogo ? `images/${config.courseLogo}` : 'images/pcc.png';
-        const rightLogoStyle = config.courseLogo ? 'filter: contrast(1.1);' : 'filter: grayscale(100%);';
+        // Mirrors answer-sheet.js: resolveUrl normalises the absolute /courselogos/...
+        // override and the relative images/... default alike.
+        const rightLogoSrc = config.courseLogo
+            ? (window.scanCheckConfig ? window.scanCheckConfig.resolveUrl(String(config.courseLogo)) : String(config.courseLogo))
+            : '';
         const rightLogoSize = LOGO_SIZE_IN * (Number(config.courseLogoScale) || 1);
+        // Kept in step with answer-sheet.js: pcc.png is the college seal for the
+        // left slot only, and the placeholder preserves the fixed-size box so the
+        // QR never shifts.
+        const rightLogoMarkup = rightLogoSrc
+            ? `<img src="${rightLogoSrc}"
+                        style="
+                            width: ${rightLogoSize}in;
+                            height: ${rightLogoSize}in;
+                            object-fit: contain;
+                            display: block;
+                            flex: 0 0 auto;
+                            filter: contrast(1.1);
+                         "
+                         alt="Course Logo">`
+            : `<div style="
+                            width: ${rightLogoSize}in;
+                            height: ${rightLogoSize}in;
+                            flex: 0 0 auto;
+                            box-sizing: border-box;
+                            border: 1px dashed #b8c0c8;
+                            border-radius: 4px;
+                            background: #f8f9fa;
+                         "
+                         title="No course logo configured"></div>`;
         
         let qrWrapper = `
             <div style="
@@ -317,16 +344,7 @@ class NormalAnswerSheetGenerator {
                     flex-shrink: 0;
                     white-space: nowrap;
                 ">
-                    <img src="${rightLogoSrc}" 
-                        style="
-                            width: ${rightLogoSize}in;
-                            height: ${rightLogoSize}in;
-                            object-fit: contain;
-                            display: block;
-                            flex: 0 0 auto;
-                            ${rightLogoStyle}
-                        " 
-                        alt="Right Logo">
+                    ${rightLogoMarkup}
                     ${qrWrapper}
                 </div>
             </div>

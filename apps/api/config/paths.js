@@ -24,6 +24,11 @@ const uploadsDebugDir = path.join(uploadsDir, 'debug');
 const omrLayoutsDir = path.join(dataDir, 'omr-layouts');
 const generatedSheetsDir = path.join(dataDir, 'generated-sheets');
 
+// Course logo overrides. The shipped defaults live in apps/web/images and are
+// tracked by git; anything a user uploads lands here so replacing a logo never
+// dirties the repository with a multi-megabyte binary.
+const courseLogosDir = resolvePath(process.env.SCANCHECK_COURSE_LOGOS_DIR, path.join(runtimeRoot, 'courselogos'));
+
 const omrServiceRoot = resolvePath(process.env.SCANCHECK_OMR_SERVICE_DIR, path.join(REPO_ROOT, 'services', 'omr-python'));
 const omrCalibrationInputDir = resolvePath(
     process.env.SCANCHECK_OMR_CALIBRATION_DIR,
@@ -49,6 +54,7 @@ const paths = {
     uploadsDebugDir,
     omrLayoutsDir,
     generatedSheetsDir,
+    courseLogosDir,
     omrServiceRoot,
     omrCalibrationInputDir,
     omrTemplateDir: path.join(omrServiceRoot, 'omrchecker-template'),
@@ -67,7 +73,8 @@ function ensureRuntimeDirs() {
         paths.uploadsReceivedDir,
         paths.uploadsDebugDir,
         paths.omrLayoutsDir,
-        paths.generatedSheetsDir
+        paths.generatedSheetsDir,
+        paths.courseLogosDir
     ].forEach((dir) => {
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });

@@ -332,6 +332,10 @@ class ScanCheckApp {
         this.refreshSystemBackupHistory();
         this.loadAiOmrSettings();
         this.applyScannerViewSettings();
+        // Course logos resolve from the catalog, but /api/courses is protected and
+        // a guest visit here would turn into a 401 -> forced re-login. Loading is
+        // kicked off from showAuthenticatedUI() instead; this just paints the card.
+        this.renderCourseLogos();
     }
 
     renderAiOmrSettings(settings = {}) {
@@ -2393,7 +2397,7 @@ class ScanCheckApp {
         const config = {
             ...this.normalizeQuizData(q),
             courseName: 'Answer Sheet',
-            courseLogo: 'pcc.png',
+            courseLogo: null,
             subjects: this.getSubjectConfigForQuiz(q),
             examId: examId,
             paperSize: paperSize,
@@ -2442,6 +2446,9 @@ class ScanCheckApp {
         document.getElementById('signOutBtn').classList.remove('d-none');
         const addStaffBtn = document.getElementById('addStaffBtn');
         if (addStaffBtn) addStaffBtn.classList.remove('d-none');
+        // Warm the course catalog on every successful auth so answer-sheet
+        // generation can resolve course logos synchronously.
+        this.loadCourseCatalog(true).then(() => this.renderCourseLogos());
     }
 
     cleanupBootstrapModalState() {
@@ -3405,6 +3412,9 @@ class ScanCheckApp {
         });
         document.getElementById('aiOmrSaveSettingsBtn')?.addEventListener('click', () => {
             this.saveAiOmrSettings(false);
+        });
+        document.getElementById('courseLogoFileInput')?.addEventListener('change', (event) => {
+            this.uploadCourseLogoFile(event);
         });
         document.getElementById('aiOmrStrategy')?.addEventListener('change', (event) => {
             if (event.target.value === 'custom') {
@@ -8427,42 +8437,216 @@ class ScanCheckApp {
         return this.createSequentialSheetId(next - 1);
     }
 
+    // Courses and their logos live in the courses table now, so adding one is a
+    // data change rather than a code change. Cached in memory after the first
+    // load so sheet generation stays synchronous.
+    getCourseCatalog() {
+        return Array.isArray(this.courseCatalog) ? this.courseCatalog : [];
+    }
+
+    setCourseCatalog(courses) {
+        this.courseCatalog = Array.isArray(courses) ? courses : [];
+        this.courseCatalogLoadedAt = Date.now();
+    }
+
+    resolveCourseFromCatalog(courseInput) {
+        const key = String(courseInput || '').trim();
+        if (!key) return null;
+        const catalog = this.getCourseCatalog();
+        for (const course of catalog) {
+            if (course.code === key || course.name === key) return course;
+        }
+        const lowered = key.toLowerCase();
+        for (const course of catalog) {
+            if ((course.aliases || []).some((alias) => String(alias).toLowerCase() === lowered)) {
+                return course;
+            }
+        }
+        return null;
+    }
+
+    // Returns null when no course matches. The right header slot renders a
+    // fixed-size placeholder in that case - pcc.png is the college seal and is
+    // never used as a course logo.
     getCourseLogoForCourse(courseName) {
-        const courseLogoMap = {
-            'Bachelor of Science in Criminology': 'Bachelor of Science in Criminology.png',
-            'BS CRIMINOLOGY': 'Bachelor of Science in Criminology.png',
-            'BSCRIM': 'Bachelor of Science in Criminology.png',
-            'Bachelor of Elementary Education': 'Bachelor of Elementary Education.png',
-            'BEED': 'Bachelor of Elementary Education.png',
-            'BEEd': 'Bachelor of Elementary Education.png',
-            'Bachelor of Secondary Education': 'Bachelor of Elementary Education.png',
-            'BSED': 'Bachelor of Elementary Education.png',
-            'BSEd': 'Bachelor of Elementary Education.png',
-            'Bachelor of Science in Hospitality Management': 'Bachelor of Science in Hospitality Management.png',
-            'BSHM': 'Bachelor of Science in Hospitality Management.png',
-            'Bachelor of Science in Business Administration': 'Bachelor of Science in Business Administration.png',
-            'BSBA': 'Bachelor of Science in Business Administration.png',
-            'Bachelor of Science in Information Technology': 'Bachelor of Science in Information Technology.png',
-            'BSIT': 'Bachelor of Science in Information Technology.png'
-        };
-        return courseLogoMap[String(courseName || '').trim()] || 'pcc.png';
+        const course = this.resolveCourseFromCatalog(courseName);
+        if (!course) return null;
+        if (course.overrideLogoUrl) return course.overrideLogoUrl;
+        if (course.defaultLogo) return `images/${course.defaultLogo}`;
+        return null;
     }
 
     // Most course logos fill their PNG canvas, so a shared box size renders
-    // them at matching visual weight. The Hospitality Management emblem is a
-    // circle drawn inside a square, leaving white corners that belong to the
-    // artwork rather than to the file padding - object-fit: contain cannot
-    // recover that space. Measured against the canvas, its art spans roughly
-    // 78% of the width, so it is scaled up to match. Trimming the PNGs was
-    // measured and rejected: their alpha bounding boxes are within ~2% of the
-    // full canvas, so there is no padding to remove.
+    // them at matching visual weight. A per-course scale covers artwork drawn
+    // small inside an otherwise full-bleed canvas, which object-fit: contain
+    // cannot correct.
     getCourseLogoScaleForCourse(courseName) {
-        const logoScaleMap = {
-            'Bachelor of Science in Hospitality Management': 1.27,
-            'BSHM': 1.27
+        const course = this.resolveCourseFromCatalog(courseName);
+        const scale = course ? Number(course.logoScale) : 1;
+        return Number.isFinite(scale) && scale > 0 ? scale : 1;
+    }
+
+    courseLogoPreviewUrl(course) {
+        if (!course || !course.logoUrl) return null;
+        return window.scanCheckConfig?.resolveUrl ? window.scanCheckConfig.resolveUrl(course.logoUrl) : course.logoUrl;
+    }
+
+    renderCourseLogos() {
+        const list = document.getElementById('courseLogoList');
+        if (!list) return;
+
+        const defaultDir = document.getElementById('courseLogoDefaultDir');
+        const overrideDir = document.getElementById('courseLogoOverrideDir');
+        const dirs = this.courseLogoDirectories || {};
+        if (defaultDir) defaultDir.textContent = dirs.defaultDirectory || '-';
+        if (overrideDir) overrideDir.textContent = dirs.overrideDirectory || '-';
+
+        const courses = this.getCourseCatalog();
+        if (courses.length === 0) {
+            // Distinguish "still loading" from "nothing configured" so a guest or
+            // an in-flight fetch does not flash a misleading empty state.
+            list.innerHTML = this.courseCatalogLoadedAt
+                ? '<div class="text-muted small">No courses configured.</div>'
+                : '<div class="text-muted small">Loading course logos...</div>';
+            return;
+        }
+
+        list.innerHTML = '';
+        for (const course of courses) {
+            const preview = this.courseLogoPreviewUrl(course);
+            const isOverride = course.logoSource === 'override';
+
+            const row = document.createElement('div');
+            row.className = 'd-flex align-items-center gap-3 p-3 border rounded-3 bg-white';
+            row.dataset.courseCode = course.code;
+
+            const thumb = document.createElement('div');
+            thumb.className = 'd-flex align-items-center justify-content-center border rounded-3 bg-light flex-shrink-0';
+            thumb.style.width = '64px';
+            thumb.style.height = '64px';
+            if (preview) {
+                const img = document.createElement('img');
+                img.src = preview;
+                img.alt = `${course.name} logo`;
+                img.className = 'w-100 h-100';
+                img.style.objectFit = 'contain';
+                img.onerror = () => { thumb.textContent = '!'; };
+                thumb.appendChild(img);
+            } else {
+                thumb.innerHTML = '<i class="fas fa-image text-muted"></i>';
+            }
+
+            const meta = document.createElement('div');
+            meta.className = 'flex-grow-1 min-w-0';
+            const badge = isOverride
+                ? '<span class="badge bg-success bg-opacity-10 text-success ms-2">Your logo</span>'
+                : '<span class="badge bg-secondary bg-opacity-10 text-secondary ms-2">Default</span>';
+            meta.innerHTML = `
+                <div class="fw-bold small">${course.name}${badge}</div>
+                <div class="text-muted small">${course.code} &middot; ${(course.aliases || []).length} accepted name(s)</div>
+            `;
+
+            const actions = document.createElement('div');
+            actions.className = 'd-flex gap-2 flex-shrink-0';
+
+            const replaceBtn = document.createElement('button');
+            replaceBtn.type = 'button';
+            replaceBtn.className = 'btn btn-sm btn-outline-primary';
+            replaceBtn.innerHTML = '<i class="fas fa-rotate me-1"></i> Replace Logo';
+            replaceBtn.addEventListener('click', () => this.pickCourseLogoFile(course.code));
+            actions.appendChild(replaceBtn);
+
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            // Greyed out while the course is still using its shipped default:
+            // there is no override to remove, and the default file is read-only.
+            removeBtn.className = `btn btn-sm ${isOverride ? 'btn-outline-danger' : 'btn-outline-secondary'}`;
+            removeBtn.innerHTML = '<i class="fas fa-trash me-1"></i> Remove';
+            removeBtn.disabled = !isOverride;
+            if (!isOverride) {
+                removeBtn.title = 'This course is using its default logo.';
+            }
+            removeBtn.addEventListener('click', () => this.removeCourseLogo(course.code));
+            actions.appendChild(removeBtn);
+
+            row.appendChild(thumb);
+            row.appendChild(meta);
+            row.appendChild(actions);
+            list.appendChild(row);
+        }
+    }
+
+    pickCourseLogoFile(code) {
+        const input = document.getElementById('courseLogoFileInput');
+        if (!input) return;
+        input.dataset.courseCode = code;
+        input.value = '';
+        input.click();
+    }
+
+    async uploadCourseLogoFile(event) {
+        const input = event.target;
+        const code = input?.dataset?.courseCode;
+        const [file] = input?.files || [];
+        if (!code || !file) return;
+
+        if (file.type && file.type !== 'image/png') {
+            this.showToast('Please choose a PNG image.', 'warning');
+            return;
+        }
+        if (file.size > 12 * 1024 * 1024) {
+            this.showToast('Logo must be 12MB or smaller.', 'warning');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onerror = () => this.showToast('Could not read that file.', 'danger');
+        reader.onload = async () => {
+            try {
+                const response = await this.apiCallWithAuth('/api/courses/logo', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code, dataUrl: reader.result })
+                }, 'uploadCourseLogo');
+                await this.loadCourseCatalog(true);
+                this.renderCourseLogos();
+                this.showToast(`Logo updated for ${response?.course?.name || code}.`, 'success');
+            } catch (error) {
+                this.showToast(`Logo upload failed: ${error.message || error}`, 'danger');
+            }
         };
-        const scale = logoScaleMap[String(courseName || '').trim()];
-        return Number.isFinite(scale) ? scale : 1;
+        reader.readAsDataURL(file);
+    }
+
+    async removeCourseLogo(code) {
+        try {
+            const response = await this.apiCallWithAuth(`/api/courses/logo/${encodeURIComponent(code)}`, {
+                method: 'DELETE'
+            }, 'removeCourseLogo');
+            await this.loadCourseCatalog(true);
+            this.renderCourseLogos();
+            this.showToast(`Restored the default logo for ${response?.course?.name || code}.`, 'success');
+        } catch (error) {
+            this.showToast(`Could not remove logo: ${error.message || error}`, 'danger');
+        }
+    }
+
+    async loadCourseCatalog(force = false) {
+        const stale = !this.courseCatalogLoadedAt || (Date.now() - this.courseCatalogLoadedAt) > 30000;
+        if (!force && !stale && this.getCourseCatalog().length > 0) return this.getCourseCatalog();
+        try {
+            const response = await this.apiCallWithAuth('/api/courses', {}, 'loadCourseCatalog');
+            const courses = Array.isArray(response?.courses) ? response.courses : [];
+            this.setCourseCatalog(courses);
+            this.courseLogoDirectories = {
+                defaultDirectory: response?.defaultDirectory || '',
+                overrideDirectory: response?.overrideDirectory || ''
+            };
+            return courses;
+        } catch (error) {
+            console.error('Error loading course catalog:', error);
+            return this.getCourseCatalog();
+        }
     }
 
     getSelectedExamForSheet() {
@@ -8873,7 +9057,7 @@ class ScanCheckApp {
         const config = {
             ...q,
             courseName: 'Answer Sheet',
-            courseLogo: 'pcc.png'
+            courseLogo: null
         };
         
         const previewContainer = document.getElementById('omr-sheet');
@@ -8916,7 +9100,7 @@ class ScanCheckApp {
         const config = quiz ? {
             ...quiz,
             courseName: 'Answer Sheet',
-            courseLogo: 'pcc.png'
+            courseLogo: null
         } : {
             questions: 100,
             options: 4,
