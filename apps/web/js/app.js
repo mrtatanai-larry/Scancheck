@@ -8575,7 +8575,7 @@ this.systems = [];
             const replaceBtn = document.createElement('button');
             replaceBtn.type = 'button';
             replaceBtn.className = 'btn btn-sm btn-outline-primary';
-            replaceBtn.innerHTML = '<i class="fas fa-rotate me-1"></i> Replace';
+            replaceBtn.innerHTML = '<i class="fas fa-rotate"></i> Replace';
             replaceBtn.addEventListener('click', () => this.pickCourseLogoFile(course.code));
             actions.appendChild(replaceBtn);
 
@@ -8584,7 +8584,7 @@ this.systems = [];
             // Greyed out while the course is still using its shipped default:
             // there is no override to remove, and the default file is read-only.
             removeBtn.className = `btn btn-sm ${isOverride ? 'btn-outline-danger' : 'btn-outline-secondary'}`;
-            removeBtn.innerHTML = '<i class="fas fa-trash me-1"></i> Remove';
+            removeBtn.innerHTML = '<i class="fas fa-trash"></i> Remove';
             removeBtn.disabled = !isOverride;
             if (!isOverride) {
                 removeBtn.title = 'This course is using its default logo.';
