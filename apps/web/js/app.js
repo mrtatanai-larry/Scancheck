@@ -230,7 +230,8 @@ class ScanCheckApp {
                 this.quizzes = [];
                 this.scanResults = [];
                 this.records = [];
-                this.systems = [];
+this.systems = [];
+        this.settingsTab = 'general';
                 this.renderQuizList();
                 this.renderScanResults();
                 this.renderRecords();
@@ -8489,6 +8490,24 @@ class ScanCheckApp {
     courseLogoPreviewUrl(course) {
         if (!course || !course.logoUrl) return null;
         return window.scanCheckConfig?.resolveUrl ? window.scanCheckConfig.resolveUrl(course.logoUrl) : course.logoUrl;
+    }
+
+    // The settings page is split into General (course logos + system info) and
+    // Advanced (AI scanner + backups). Switching panes is a plain class toggle
+    // rather than Bootstrap tabs, matching the other in-page switchers in this
+    // app; the left sidebar stays on "Settings" for both.
+    setSettingsTab(tab = 'general') {
+        const next = tab === 'advanced' ? 'advanced' : 'general';
+        this.settingsTab = next;
+        document.querySelectorAll('.settings-tab').forEach((btn) => {
+            const active = btn.id === `settingsTab${next.charAt(0).toUpperCase()}${next.slice(1)}`;
+            btn.classList.toggle('active', active);
+            btn.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+        ['general', 'advanced'].forEach((key) => {
+            const pane = document.getElementById(`settingsPane${key.charAt(0).toUpperCase()}${key.slice(1)}`);
+            if (pane) pane.classList.toggle('d-none', key !== next);
+        });
     }
 
     renderCourseLogos() {

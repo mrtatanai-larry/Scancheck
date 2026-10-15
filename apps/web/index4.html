@@ -1122,357 +1122,378 @@
             </div>
         </div>
 
-        <div class="row g-4">
-            <!-- Left Column: Settings Groups -->
-            <div class="col-lg-8">
-                <!-- Backup & Maintenance Group -->
-                <div class="card shadow-sm border-0 mb-4 overflow-hidden">
-                    <div class="card-header bg-white py-3 border-bottom">
-                        <div class="d-flex align-items-center">
-                            <div class="settings-icon-box bg-primary bg-opacity-10 text-primary me-3">
-                                <i class="fas fa-database"></i>
+
+        <!-- Settings Section Switcher -->
+        <div class="settings-tab-nav mb-4" role="tablist" aria-label="Settings sections">
+            <button type="button" class="settings-tab active" id="settingsTabGeneral" role="tab"
+                    aria-selected="true" aria-controls="settingsPaneGeneral"
+                    onclick="app.setSettingsTab('general')">
+                <i class="fas fa-sliders-h me-2"></i> General Settings
+            </button>
+            <button type="button" class="settings-tab" id="settingsTabAdvanced" role="tab"
+                    aria-selected="false" aria-controls="settingsPaneAdvanced"
+                    onclick="app.setSettingsTab('advanced')">
+                <i class="fas fa-microchip me-2"></i> Advanced
+            </button>
+        </div>
+
+        <!-- General Settings Pane -->
+        <div id="settingsPaneGeneral" class="settings-tab-pane" role="tabpanel" aria-labelledby="settingsTabGeneral">
+            <div class="row g-4">
+                <div class="col-lg-8">
+                    <!-- Course Logos Group -->
+                    <div class="card shadow-sm border-0 mb-4 overflow-hidden">
+                        <div class="card-header bg-white py-3 border-bottom">
+                            <div class="d-flex align-items-center">
+                                <div class="settings-icon-box bg-info bg-opacity-10 text-info me-3">
+                                    <i class="fas fa-image"></i>
+                                </div>
+<div>
+                                <h5 class="mb-0 fw-bold">Course Logos</h5>
                             </div>
-                            <div>
-                                <h5 class="mb-0 fw-bold">Maintenance & Data</h5>
-                                <p class="text-muted small mb-0">Manage system backups and data integrity.</p>
+                            <span id="courseLogoCount" class="badge rounded-pill bg-secondary bg-opacity-10 text-secondary ms-auto">0 courses</span>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div id="courseLogoList" class="course-logo-grid">
+                                <div class="text-muted small">Loading course logos...</div>
+                            </div>
+
+                            <input type="file" id="courseLogoFileInput" accept="image/png" class="d-none">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Column: System Info & Credits -->
+                <div class="col-lg-4">
+                <!-- Right Column: System Info & Credits -->
+                <div class="col-lg-4">
+                    <div class="card shadow-sm border-0 mb-4 bg-primary text-white overflow-hidden settings-info-card">
+                        <div class="card-body p-4 position-relative">
+                            <div class="d-flex align-items-center mb-4">
+                                <div class="bg-white bg-opacity-20 rounded-circle p-2 me-3" style="width: 80px; height: 80px; display: flex; align-items: center; justify-content: center;">
+                                    <img src="logo/qr-code-white.svg" alt="ScanCheck Logo" style="width: 100%; height: 100%; object-fit: contain; border-radius: 50%;">
+                                </div>
+                                <div>
+                                    <h4 class="fw-bold mb-0">ScanCheck</h4>
+                                    <p class="small opacity-75 mb-0">v2.1.0-release</p>
+                                </div>
+                            </div>
+
+                            <div class="system-status-pill mb-4">
+                                <i class="fas fa-check-circle me-2"></i> System is Online
+                            </div>
+
+                            <div class="border-top border-white border-opacity-10 pt-4 mt-2">
+                                <h6 class="small text-uppercase opacity-75 fw-bold mb-3">Development Team</h6>
+                                <h3 class="fw-bold mb-1">APEX Group</h3>
+                                <p class="small opacity-75 mb-4">Project of PCC BSIT 4th Year</p>
+
+                                <div class="team-leader-badge mb-4">
+                                    <div class="badge-icon"><i class="fas fa-crown"></i></div>
+                                    <div class="badge-content">
+                                        <div class="badge-name">MICHELLE A. MIRANDA</div>
+                                        <div class="badge-role">Project Manager</div>
+                                    </div>
+                                </div>
+
+                                <div class="team-members-list small">
+                                    <div class="row g-2">
+                                        <div class="col-6">GILLYN L. MENDOZA</div>
+                                        <div class="col-6">ARNOLD A. EUSALA</div>
+                                        <div class="col-6">BRYXTER D. CASTOR</div>
+                                        <div class="col-6">DOMINIC A. CASIPIT</div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
-                    <div class="card-body">
-                        <div class="row g-4">
-                            <div class="col-md-4">
-                                <div class="p-4 border rounded-4 bg-light bg-opacity-50 h-100">
-                                    <h6 class="fw-bold mb-3 d-flex align-items-center">
-                                        <i class="fas fa-cloud-download-alt text-primary me-2"></i>
-                                        Backup System
-                                    </h6>
-                                    <p class="small text-muted mb-4">Export all examination data, student records, and system configurations to a secure ZIP archive.</p>
-                                    <button class="btn btn-primary w-100 py-2 rounded-3" id="systemBackupDownloadBtn">
-                                        <i class="fas fa-download me-2"></i> Generate Backup
-                                    </button>
+
+                    <div class="card shadow-sm border-0 p-4 text-center">
+                        <img src="images/pcc.png" alt="PCC Logo" class="mx-auto mb-3" style="width: 80px; height: 80px; object-fit: contain;">
+                        <h6 class="fw-bold mb-1">Passi City College</h6>
+                        <p class="small text-muted mb-0">Bachelor of Science in Information Technology</p>
+                        <hr class="my-3">
+                        <p class="x-small text-muted">&copy; 2026 PCC ScanCheck. All rights reserved.</p>
+                    </div>
+                </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Advanced Pane (full width) -->
+        <div id="settingsPaneAdvanced" class="settings-tab-pane d-none" role="tabpanel" aria-labelledby="settingsTabAdvanced">
+                    <div class="card shadow-sm border-0 mb-4 overflow-hidden">
+                        <div class="card-header bg-white py-3 border-bottom">
+                            <div class="d-flex align-items-center">
+                                <div class="settings-icon-box bg-success bg-opacity-10 text-success me-3">
+                                    <i class="fas fa-robot"></i>
+                                </div>
+                                <div>
+                                    <h5 class="mb-0 fw-bold">AI Vision Scanner</h5>
+                                    <p class="text-muted small mb-0">Production answer reader</p>
+                                </div>
+                                <span id="aiOmrConnectionBadge" class="badge bg-secondary ms-auto">Checking</span>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="ai-settings-section">
+                                <div class="ai-section-title">Status</div>
+                                <div class="row g-3">
+                                    <div class="col-md-4">
+                                        <div class="ai-status-tile">
+                                            <span class="text-muted">Provider</span>
+                                            <strong id="aiOmrProviderText">Gemini</strong>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="ai-status-tile">
+                                            <span class="text-muted">Production Scanner</span>
+                                            <strong id="aiOmrProductionScannerText">AI Vision</strong>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="ai-status-tile">
+                                            <span class="text-muted">Connection</span>
+                                            <strong id="aiOmrStatusText">Not checked</strong>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="col-md-4">
-                                <div class="p-4 border rounded-4 bg-light bg-opacity-50 h-100">
-                                    <h6 class="fw-bold mb-3 d-flex align-items-center">
-                                        <i class="fas fa-cloud-upload-alt text-success me-2"></i>
-                                        Upload & Restore
-                                    </h6>
-                                    <p class="small text-muted mb-4">Upload a backup file from your computer. <strong>Note:</strong> Files over 500MB should use Local Path restore for better reliability.</p>
-                                    <button class="btn btn-outline-success w-100 py-2 rounded-3" id="systemBackupChooseFileBtn">
-                                        <i class="fas fa-file-import me-2"></i> Choose File
-                                    </button>
+
+                            <div class="ai-settings-section">
+                                <div class="ai-section-title">Basic Settings</div>
+                                <div class="row g-3">
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold text-uppercase text-muted">Scanning Strategy</label>
+                                        <select id="aiOmrStrategy" class="form-select">
+                                            <option value="auto">Auto - Recommended</option>
+                                            <option value="fast">Fast</option>
+                                            <option value="high_accuracy">High Accuracy</option>
+                                            <option value="custom">Custom</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold text-uppercase text-muted">Image Detail</label>
+                                        <select id="aiOmrImageDetail" class="form-select">
+                                            <option value="low">Low</option>
+                                            <option value="medium">Medium - Recommended</option>
+                                            <option value="high">High</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small fw-bold text-uppercase text-muted">Verification</label>
+                                        <select id="aiOmrVerificationMode" class="form-select">
+                                            <option value="uncertain">Uncertain answers only</option>
+                                            <option value="always">Always verify</option>
+                                            <option value="disabled">Disabled</option>
+                                        </select>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="col-md-4">
-                                <div class="p-4 border rounded-4 bg-light bg-opacity-50 h-100">
-                                    <h6 class="fw-bold mb-3 d-flex align-items-center">
-                                        <i class="fas fa-hdd text-info me-2"></i>
-                                        Local Path Restore
-                                    </h6>
-                                    <p class="small text-muted mb-4">Recommended for huge backups (100GB+). Enter the absolute path of a ZIP file already on the server.</p>
-                                    <div class="input-group mb-3">
-                                        <input type="text" id="systemBackupLocalPath" class="form-control form-control-sm rounded-start-3" placeholder="/path/to/backup.zip">
-                                        <button class="btn btn-info btn-sm text-white rounded-end-3" onclick="app.restoreFromLocalPath()">
-                                            <i class="fas fa-play"></i>
+
+                            <div class="ai-settings-section">
+                                <div class="ai-section-title">API Connection</div>
+                                <div class="row g-3">
+                                    <div class="col-12">
+                                        <label class="form-label small fw-bold text-uppercase text-muted">Gemini API Key</label>
+                                        <div id="aiOmrKeyPreview" class="ai-key-preview">Not configured</div>
+                                        <div class="form-text" id="aiOmrKeyStatus">Key status not loaded.</div>
+                                    </div>
+                                </div>
+                                <div class="row g-3 align-items-center">
+                                    <div class="col-lg-7">
+                                        <div id="aiOmrKeyInputGroup" class="input-group d-none">
+                                            <input type="password" id="aiOmrApiKey" class="form-control" autocomplete="off" placeholder="Paste replacement Gemini API key">
+                                            <button class="btn btn-outline-secondary" type="button" id="aiOmrToggleKeyBtn">
+                                                <i class="fas fa-eye"></i>
+                                            </button>
+                                            <button class="btn btn-outline-secondary" type="button" id="aiOmrCancelReplaceKeyBtn">Cancel</button>
+                                        </div>
+                                    </div>
+                                    <div class="col-lg-5 d-flex flex-wrap gap-2 align-items-center justify-content-lg-end">
+                                        <button class="btn btn-outline-primary" id="aiOmrTestConnectionBtn" type="button">
+                                            <i class="fas fa-plug me-1"></i> Test Connection
+                                        </button>
+                                        <button class="btn btn-outline-secondary" id="aiOmrReplaceKeyBtn" type="button">
+                                            <i class="fas fa-key me-1"></i> Replace Key
                                         </button>
                                     </div>
                                 </div>
                             </div>
-                        </div>
 
-                        <input type="file" id="systemBackupFileInput" accept=".zip,application/zip" class="d-none">
+                            <div class="ai-settings-section">
+                                <div class="ai-section-title">Usage</div>
+                                <div class="ai-usage-grid">
+                                    <div class="ai-usage-tile"><span>Papers This Month</span><strong id="aiOmrUsageMonthPapers">-</strong></div>
+                                    <div class="ai-usage-tile"><span>API Requests</span><strong id="aiOmrUsageRequests">-</strong></div>
+                                    <div class="ai-usage-tile"><span>Average Processing</span><strong id="aiOmrUsageAvgProcessing">-</strong></div>
+                                    <div class="ai-usage-tile"><span>Total Tokens</span><strong id="aiOmrUsageTokens">-</strong></div>
+                                </div>
+                            </div>
 
-                        <div class="mt-4 p-3 border rounded-4 bg-white shadow-sm d-none" id="restoreActionPanel">
-                            <div class="d-flex align-items-center justify-content-between">
-                                <div class="d-flex align-items-center">
-                                    <div class="bg-success bg-opacity-10 text-success p-2 rounded-circle me-3">
-                                        <i class="fas fa-file-archive fs-5"></i>
-                                    </div>
-                                    <div>
-                                        <h6 class="fw-bold mb-0">Ready to Restore</h6>
-                                        <p id="systemBackupSelectedFile" class="small text-muted mb-0">No file selected</p>
+                            <div class="ai-settings-section mb-0">
+                                <button class="btn btn-link px-0 fw-bold text-decoration-none" type="button" data-bs-toggle="collapse" data-bs-target="#aiOmrAdvancedCollapse" aria-expanded="false" aria-controls="aiOmrAdvancedCollapse">
+                                    <i class="fas fa-sliders-h me-1"></i> Advanced AI Configuration
+                                </button>
+                                <div id="aiOmrAdvancedCollapse" class="collapse">
+                                    <div class="row g-3 align-items-end pt-2">
+                                        <div class="col-md-4 d-none">
+                                            <label class="form-label small fw-bold text-uppercase text-muted">Provider</label>
+                                            <select id="aiOmrProvider" class="form-select">
+                                                <option value="gemini">Gemini</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small fw-bold text-uppercase text-muted">Model</label>
+                                            <select id="aiOmrModel" class="form-select">
+                                                <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
+                                                <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+                                                <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite</option>
+                                                <option value="gemini-flash-latest">Gemini Flash Latest</option>
+                                                <option value="gemini-flash-lite-latest">Gemini Flash-Lite Latest</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small fw-bold text-uppercase text-muted">Raw Section Size</label>
+                                            <select id="aiOmrSectionSize" class="form-select">
+                                                <option value="20">20 questions</option>
+                                                <option value="10">10 questions</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small fw-bold text-uppercase text-muted">Prompt Version</label>
+                                            <input type="text" id="aiOmrPromptVersion" class="form-control" maxlength="80" placeholder="omr-prompt-v1">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small fw-bold text-uppercase text-muted">Timeout</label>
+                                            <input type="number" min="1000" step="1000" id="aiOmrTimeoutMs" class="form-control" placeholder="30000">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small fw-bold text-uppercase text-muted">Retries</label>
+                                            <input type="number" min="0" max="5" id="aiOmrMaxRetries" class="form-control" placeholder="2">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small fw-bold text-uppercase text-muted">Confidence Threshold</label>
+                                            <input type="number" min="0" max="1" step="0.01" id="aiOmrConfidenceThreshold" class="form-control" placeholder="0.75">
+                                        </div>
+                                        <div class="col-12">
+                                            <div class="d-flex justify-content-between align-items-center gap-2">
+                                                <label class="form-label small fw-bold text-uppercase text-muted mb-1">Scanner Prompt</label>
+                                                <button class="btn btn-link btn-sm p-0" id="aiOmrRestorePromptBtn" type="button">Restore Default Prompt</button>
+                                            </div>
+                                            <textarea id="aiOmrInstructionPrompt" class="form-control" rows="5" maxlength="4000" placeholder="AI scanner mark-reading instructions"></textarea>
+                                            <div class="form-text">Do not include answer keys, scores, or student private details.</div>
+                                        </div>
+                                        <div class="col-12 border-top pt-3 d-flex flex-wrap gap-2 align-items-center">
+                                            <span class="small fw-bold text-muted text-uppercase me-auto">Manage API Key</span>
+                                            <button class="btn btn-outline-danger" id="aiOmrRemoveKeyBtn" type="button">
+                                                <i class="fas fa-trash-alt me-1"></i> Remove API Key
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
-                                <button class="btn btn-success px-4 py-2" id="systemBackupRestoreBtn">
-                                    <i class="fas fa-upload me-2"></i> Start Restore
+                            </div>
+
+                            <div class="d-flex justify-content-end mt-4">
+                                <button class="btn btn-primary" id="aiOmrSaveSettingsBtn" type="button">
+                                    <i class="fas fa-save me-1"></i> Save Settings
                                 </button>
                             </div>
                         </div>
-
-                        <div class="mt-4">
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <span class="small fw-bold text-muted text-uppercase">Operation Logs</span>
-                            </div>
-                            <pre id="systemBackupLog" class="settings-console mb-0">Ready.</pre>
-                        </div>
-
-                        <div class="mt-4">
-                            <h6 class="small fw-bold text-muted text-uppercase mb-3">Snapshot History</h6>
-                            <div id="systemBackupHistory" class="settings-history-list">
-                                <!-- Populated by JS -->
-                            </div>
-                        </div>
                     </div>
-                </div>
 
-                <div class="card shadow-sm border-0 mb-4 overflow-hidden">
-                    <div class="card-header bg-white py-3 border-bottom">
-                        <div class="d-flex align-items-center">
-                            <div class="settings-icon-box bg-success bg-opacity-10 text-success me-3">
-                                <i class="fas fa-robot"></i>
-                            </div>
-                            <div>
-                                <h5 class="mb-0 fw-bold">AI Vision Scanner</h5>
-                                <p class="text-muted small mb-0">Production answer reader</p>
-                            </div>
-                            <span id="aiOmrConnectionBadge" class="badge bg-secondary ms-auto">Checking</span>
-                        </div>
-                    </div>
-                    <div class="card-body">
-                        <div class="ai-settings-section">
-                            <div class="ai-section-title">Status</div>
-                            <div class="row g-3">
-                                <div class="col-md-4">
-                                    <div class="ai-status-tile">
-                                        <span class="text-muted">Provider</span>
-                                        <strong id="aiOmrProviderText">Gemini</strong>
-                                    </div>
+                    <!-- Backup & Maintenance Group -->
+                    <div class="card shadow-sm border-0 mb-4 overflow-hidden">
+                        <div class="card-header bg-white py-3 border-bottom">
+                            <div class="d-flex align-items-center">
+                                <div class="settings-icon-box bg-primary bg-opacity-10 text-primary me-3">
+                                    <i class="fas fa-database"></i>
                                 </div>
-                                <div class="col-md-4">
-                                    <div class="ai-status-tile">
-                                        <span class="text-muted">Production Scanner</span>
-                                        <strong id="aiOmrProductionScannerText">AI Vision</strong>
-                                    </div>
-                                </div>
-                                <div class="col-md-4">
-                                    <div class="ai-status-tile">
-                                        <span class="text-muted">Connection</span>
-                                        <strong id="aiOmrStatusText">Not checked</strong>
-                                    </div>
+                                <div>
+                                    <h5 class="mb-0 fw-bold">Maintenance & Data</h5>
+                                    <p class="text-muted small mb-0">Manage system backups and data integrity.</p>
                                 </div>
                             </div>
                         </div>
-
-                        <div class="ai-settings-section">
-                            <div class="ai-section-title">Basic Settings</div>
-                            <div class="row g-3">
+                        <div class="card-body">
+                            <div class="row g-4">
                                 <div class="col-md-4">
-                                    <label class="form-label small fw-bold text-uppercase text-muted">Scanning Strategy</label>
-                                    <select id="aiOmrStrategy" class="form-select">
-                                        <option value="auto">Auto - Recommended</option>
-                                        <option value="fast">Fast</option>
-                                        <option value="high_accuracy">High Accuracy</option>
-                                        <option value="custom">Custom</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-4">
-                                    <label class="form-label small fw-bold text-uppercase text-muted">Image Detail</label>
-                                    <select id="aiOmrImageDetail" class="form-select">
-                                        <option value="low">Low</option>
-                                        <option value="medium">Medium - Recommended</option>
-                                        <option value="high">High</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-4">
-                                    <label class="form-label small fw-bold text-uppercase text-muted">Verification</label>
-                                    <select id="aiOmrVerificationMode" class="form-select">
-                                        <option value="uncertain">Uncertain answers only</option>
-                                        <option value="always">Always verify</option>
-                                        <option value="disabled">Disabled</option>
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="ai-settings-section">
-                            <div class="ai-section-title">API Connection</div>
-                            <div class="row g-3">
-                                <div class="col-12">
-                                    <label class="form-label small fw-bold text-uppercase text-muted">Gemini API Key</label>
-                                    <div id="aiOmrKeyPreview" class="ai-key-preview">Not configured</div>
-                                    <div class="form-text" id="aiOmrKeyStatus">Key status not loaded.</div>
-                                </div>
-                            </div>
-                            <div class="row g-3 align-items-center">
-                                <div class="col-lg-7">
-                                    <div id="aiOmrKeyInputGroup" class="input-group d-none">
-                                        <input type="password" id="aiOmrApiKey" class="form-control" autocomplete="off" placeholder="Paste replacement Gemini API key">
-                                        <button class="btn btn-outline-secondary" type="button" id="aiOmrToggleKeyBtn">
-                                            <i class="fas fa-eye"></i>
+                                    <div class="p-4 border rounded-4 bg-light bg-opacity-50 h-100">
+                                        <h6 class="fw-bold mb-3 d-flex align-items-center">
+                                            <i class="fas fa-cloud-download-alt text-primary me-2"></i>
+                                            Backup System
+                                        </h6>
+                                        <p class="small text-muted mb-4">Export all examination data, student records, and system configurations to a secure ZIP archive.</p>
+                                        <button class="btn btn-primary w-100 py-2 rounded-3" id="systemBackupDownloadBtn">
+                                            <i class="fas fa-download me-2"></i> Generate Backup
                                         </button>
-                                        <button class="btn btn-outline-secondary" type="button" id="aiOmrCancelReplaceKeyBtn">Cancel</button>
                                     </div>
                                 </div>
-                                <div class="col-lg-5 d-flex flex-wrap gap-2 align-items-center justify-content-lg-end">
-                                    <button class="btn btn-outline-primary" id="aiOmrTestConnectionBtn" type="button">
-                                        <i class="fas fa-plug me-1"></i> Test Connection
-                                    </button>
-                                    <button class="btn btn-outline-secondary" id="aiOmrReplaceKeyBtn" type="button">
-                                        <i class="fas fa-key me-1"></i> Replace Key
-                                    </button>
+                                <div class="col-md-4">
+                                    <div class="p-4 border rounded-4 bg-light bg-opacity-50 h-100">
+                                        <h6 class="fw-bold mb-3 d-flex align-items-center">
+                                            <i class="fas fa-cloud-upload-alt text-success me-2"></i>
+                                            Upload & Restore
+                                        </h6>
+                                        <p class="small text-muted mb-4">Upload a backup file from your computer. <strong>Note:</strong> Files over 500MB should use Local Path restore for better reliability.</p>
+                                        <button class="btn btn-outline-success w-100 py-2 rounded-3" id="systemBackupChooseFileBtn">
+                                            <i class="fas fa-file-import me-2"></i> Choose File
+                                        </button>
+                                    </div>
                                 </div>
-                            </div>
-                        </div>
-
-                        <div class="ai-settings-section">
-                            <div class="ai-section-title">Usage</div>
-                            <div class="ai-usage-grid">
-                                <div class="ai-usage-tile"><span>Papers This Month</span><strong id="aiOmrUsageMonthPapers">-</strong></div>
-                                <div class="ai-usage-tile"><span>API Requests</span><strong id="aiOmrUsageRequests">-</strong></div>
-                                <div class="ai-usage-tile"><span>Average Processing</span><strong id="aiOmrUsageAvgProcessing">-</strong></div>
-                                <div class="ai-usage-tile"><span>Total Tokens</span><strong id="aiOmrUsageTokens">-</strong></div>
-                            </div>
-                        </div>
-
-                        <div class="ai-settings-section mb-0">
-                            <button class="btn btn-link px-0 fw-bold text-decoration-none" type="button" data-bs-toggle="collapse" data-bs-target="#aiOmrAdvancedCollapse" aria-expanded="false" aria-controls="aiOmrAdvancedCollapse">
-                                <i class="fas fa-sliders-h me-1"></i> Advanced AI Configuration
-                            </button>
-                            <div id="aiOmrAdvancedCollapse" class="collapse">
-                                <div class="row g-3 align-items-end pt-2">
-                                    <div class="col-md-4 d-none">
-                                        <label class="form-label small fw-bold text-uppercase text-muted">Provider</label>
-                                        <select id="aiOmrProvider" class="form-select">
-                                            <option value="gemini">Gemini</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-md-4">
-                                        <label class="form-label small fw-bold text-uppercase text-muted">Model</label>
-                                        <select id="aiOmrModel" class="form-select">
-                                            <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
-                                            <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
-                                            <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite</option>
-                                            <option value="gemini-flash-latest">Gemini Flash Latest</option>
-                                            <option value="gemini-flash-lite-latest">Gemini Flash-Lite Latest</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-md-4">
-                                        <label class="form-label small fw-bold text-uppercase text-muted">Raw Section Size</label>
-                                        <select id="aiOmrSectionSize" class="form-select">
-                                            <option value="20">20 questions</option>
-                                            <option value="10">10 questions</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-md-4">
-                                        <label class="form-label small fw-bold text-uppercase text-muted">Prompt Version</label>
-                                        <input type="text" id="aiOmrPromptVersion" class="form-control" maxlength="80" placeholder="omr-prompt-v1">
-                                    </div>
-                                    <div class="col-md-4">
-                                        <label class="form-label small fw-bold text-uppercase text-muted">Timeout</label>
-                                        <input type="number" min="1000" step="1000" id="aiOmrTimeoutMs" class="form-control" placeholder="30000">
-                                    </div>
-                                    <div class="col-md-4">
-                                        <label class="form-label small fw-bold text-uppercase text-muted">Retries</label>
-                                        <input type="number" min="0" max="5" id="aiOmrMaxRetries" class="form-control" placeholder="2">
-                                    </div>
-                                    <div class="col-md-4">
-                                        <label class="form-label small fw-bold text-uppercase text-muted">Confidence Threshold</label>
-                                        <input type="number" min="0" max="1" step="0.01" id="aiOmrConfidenceThreshold" class="form-control" placeholder="0.75">
-                                    </div>
-                                    <div class="col-12">
-                                        <div class="d-flex justify-content-between align-items-center gap-2">
-                                            <label class="form-label small fw-bold text-uppercase text-muted mb-1">Scanner Prompt</label>
-                                            <button class="btn btn-link btn-sm p-0" id="aiOmrRestorePromptBtn" type="button">Restore Default Prompt</button>
+                                <div class="col-md-4">
+                                    <div class="p-4 border rounded-4 bg-light bg-opacity-50 h-100">
+                                        <h6 class="fw-bold mb-3 d-flex align-items-center">
+                                            <i class="fas fa-hdd text-info me-2"></i>
+                                            Local Path Restore
+                                        </h6>
+                                        <p class="small text-muted mb-4">Recommended for huge backups (100GB+). Enter the absolute path of a ZIP file already on the server.</p>
+                                        <div class="input-group mb-3">
+                                            <input type="text" id="systemBackupLocalPath" class="form-control form-control-sm rounded-start-3" placeholder="/path/to/backup.zip">
+                                            <button class="btn btn-info btn-sm text-white rounded-end-3" onclick="app.restoreFromLocalPath()">
+                                                <i class="fas fa-play"></i>
+                                            </button>
                                         </div>
-                                        <textarea id="aiOmrInstructionPrompt" class="form-control" rows="5" maxlength="4000" placeholder="AI scanner mark-reading instructions"></textarea>
-                                        <div class="form-text">Do not include answer keys, scores, or student private details.</div>
-                                    </div>
-                                    <div class="col-12 border-top pt-3 d-flex flex-wrap gap-2 align-items-center">
-                                        <span class="small fw-bold text-muted text-uppercase me-auto">Manage API Key</span>
-                                        <button class="btn btn-outline-danger" id="aiOmrRemoveKeyBtn" type="button">
-                                            <i class="fas fa-trash-alt me-1"></i> Remove API Key
-                                        </button>
                                     </div>
                                 </div>
                             </div>
-                        </div>
 
-                        <div class="d-flex justify-content-end mt-4">
-                            <button class="btn btn-primary" id="aiOmrSaveSettingsBtn" type="button">
-                                <i class="fas fa-save me-1"></i> Save Settings
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                            <input type="file" id="systemBackupFileInput" accept=".zip,application/zip" class="d-none">
 
-                <!-- Course Logos Group -->
-                <div class="card shadow-sm border-0 mb-4 overflow-hidden">
-                    <div class="card-header bg-white py-3 border-bottom">
-                        <div class="d-flex align-items-center">
-                            <div class="settings-icon-box bg-info bg-opacity-10 text-info me-3">
-                                <i class="fas fa-image"></i>
-                            </div>
-                            <div>
-                                <h5 class="mb-0 fw-bold">Course Logos</h5>
-                                <p class="text-muted small mb-0">Logos printed on the right side of every answer sheet.</p>
-                            </div>
-                            <span id="courseLogoCount" class="badge rounded-pill bg-secondary bg-opacity-10 text-secondary ms-auto">0 courses</span>
-                        </div>
-                    </div>
-                    <div class="card-body">
-                        <div id="courseLogoList" class="course-logo-grid">
-                            <div class="text-muted small">Loading course logos...</div>
-                        </div>
-
-                        <input type="file" id="courseLogoFileInput" accept="image/png" class="d-none">
-                    </div>
-                </div>
-
-
-            </div>
-
-            <!-- Right Column: System Info & Credits -->
-            <div class="col-lg-4">
-                <div class="card shadow-sm border-0 mb-4 bg-primary text-white overflow-hidden settings-info-card">
-                    <div class="card-body p-4 position-relative">
-                        <div class="d-flex align-items-center mb-4">
-                            <div class="bg-white bg-opacity-20 rounded-circle p-2 me-3" style="width: 80px; height: 80px; display: flex; align-items: center; justify-content: center;">
-                                <img src="logo/qr-code-white.svg" alt="ScanCheck Logo" style="width: 100%; height: 100%; object-fit: contain; border-radius: 50%;">
-                            </div>
-                            <div>
-                                <h4 class="fw-bold mb-0">ScanCheck</h4>
-                                <p class="small opacity-75 mb-0">v2.1.0-release</p>
-                            </div>
-                        </div>
-
-                        <div class="system-status-pill mb-4">
-                            <i class="fas fa-check-circle me-2"></i> System is Online
-                        </div>
-
-                        <div class="border-top border-white border-opacity-10 pt-4 mt-2">
-                            <h6 class="small text-uppercase opacity-75 fw-bold mb-3">Development Team</h6>
-                            <h3 class="fw-bold mb-1">APEX Group</h3>
-                            <p class="small opacity-75 mb-4">Project of PCC BSIT 4th Year</p>
-
-                            <div class="team-leader-badge mb-4">
-                                <div class="badge-icon"><i class="fas fa-crown"></i></div>
-                                <div class="badge-content">
-                                    <div class="badge-name">MICHELLE A. MIRANDA</div>
-                                    <div class="badge-role">Project Manager</div>
+                            <div class="mt-4 p-3 border rounded-4 bg-white shadow-sm d-none" id="restoreActionPanel">
+                                <div class="d-flex align-items-center justify-content-between">
+                                    <div class="d-flex align-items-center">
+                                        <div class="bg-success bg-opacity-10 text-success p-2 rounded-circle me-3">
+                                            <i class="fas fa-file-archive fs-5"></i>
+                                        </div>
+                                        <div>
+                                            <h6 class="fw-bold mb-0">Ready to Restore</h6>
+                                            <p id="systemBackupSelectedFile" class="small text-muted mb-0">No file selected</p>
+                                        </div>
+                                    </div>
+                                    <button class="btn btn-success px-4 py-2" id="systemBackupRestoreBtn">
+                                        <i class="fas fa-upload me-2"></i> Start Restore
+                                    </button>
                                 </div>
                             </div>
 
-                            <div class="team-members-list small">
-                                <div class="row g-2">
-                                    <div class="col-6">GILLYN L. MENDOZA</div>
-                                    <div class="col-6">ARNOLD A. EUSALA</div>
-                                    <div class="col-6">BRYXTER D. CASTOR</div>
-                                    <div class="col-6">DOMINIC A. CASIPIT</div>
+                            <div class="mt-4">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="small fw-bold text-muted text-uppercase">Operation Logs</span>
+                                </div>
+                                <pre id="systemBackupLog" class="settings-console mb-0">Ready.</pre>
+                            </div>
+
+                            <div class="mt-4">
+                                <h6 class="small fw-bold text-muted text-uppercase mb-3">Snapshot History</h6>
+                                <div id="systemBackupHistory" class="settings-history-list">
+                                    <!-- Populated by JS -->
                                 </div>
                             </div>
                         </div>
                     </div>
-                </div>
 
-                <div class="card shadow-sm border-0 p-4 text-center">
-                    <img src="images/pcc.png" alt="PCC Logo" class="mx-auto mb-3" style="width: 80px; height: 80px; object-fit: contain;">
-                    <h6 class="fw-bold mb-1">Passi City College</h6>
-                    <p class="small text-muted mb-0">Bachelor of Science in Information Technology</p>
-                    <hr class="my-3">
-                    <p class="x-small text-muted">&copy; 2026 PCC ScanCheck. All rights reserved.</p>
-                </div>
-            </div>
         </div>
     </div>
 

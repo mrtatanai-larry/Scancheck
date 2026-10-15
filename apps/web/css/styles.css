@@ -1074,6 +1074,48 @@ body {
     background: #f8fafc;
 }
 
+/* Settings Section Tabs (General / Advanced) */
+.settings-tab-nav {
+    display: flex;
+    gap: 0.5rem;
+    border-bottom: 1px solid var(--sc-border);
+    padding-bottom: 0.75rem;
+}
+
+.settings-tab {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.5rem 1.1rem;
+    border: 1.5px solid var(--sc-border);
+    border-radius: 999px;
+    background: var(--sc-surface);
+    color: var(--sc-muted);
+    font-size: 0.87rem;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: border-color 0.15s ease, background-color 0.15s ease,
+                color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.settings-tab:hover {
+    border-color: var(--sc-primary);
+    background: var(--sc-primary-soft);
+    color: var(--sc-primary);
+}
+
+.settings-tab.active {
+    border-color: var(--sc-primary);
+    background: var(--sc-primary);
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(23, 103, 210, 0.3);
+}
+
+.settings-tab:focus-visible {
+    outline: 2px solid var(--sc-primary);
+    outline-offset: 2px;
+}
+
 /* Course Logo Tiles (System Settings) */
 .course-logo-grid {
     display: grid;
