@@ -1407,26 +1407,12 @@
                                 <h5 class="mb-0 fw-bold">Course Logos</h5>
                                 <p class="text-muted small mb-0">Logos printed on the right side of every answer sheet.</p>
                             </div>
+                            <span id="courseLogoCount" class="badge rounded-pill bg-secondary bg-opacity-10 text-secondary ms-auto">0 courses</span>
                         </div>
                     </div>
                     <div class="card-body">
-                        <div class="row g-4">
-                            <div class="col-lg-7">
-                                <div id="courseLogoList" class="d-flex flex-column gap-3">
-                                    <div class="text-muted small">Loading course logos...</div>
-                                </div>
-                            </div>
-                            <div class="col-lg-5">
-                                <h6 class="small fw-bold text-muted text-uppercase mb-2">Logo Locations</h6>
-                                <p class="small text-muted mb-1">Default logos (shipped, read-only):</p>
-                                <code class="small d-block text-break mb-3" id="courseLogoDefaultDir">-</code>
-                                <p class="small text-muted mb-1">Your replacements (used first, git-ignored):</p>
-                                <code class="small d-block text-break mb-3" id="courseLogoOverrideDir">-</code>
-                                <div class="alert alert-light border small mb-0">
-                                    <i class="fas fa-info-circle me-1"></i>
-                                    Replacing a logo never modifies the shipped file. Remove it to restore the course's own default.
-                                </div>
-                            </div>
+                        <div id="courseLogoList" class="course-logo-grid">
+                            <div class="text-muted small">Loading course logos...</div>
                         </div>
 
                         <input type="file" id="courseLogoFileInput" accept="image/png" class="d-none">

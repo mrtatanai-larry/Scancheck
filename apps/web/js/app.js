@@ -8495,18 +8495,19 @@ class ScanCheckApp {
         const list = document.getElementById('courseLogoList');
         if (!list) return;
 
-        const defaultDir = document.getElementById('courseLogoDefaultDir');
-        const overrideDir = document.getElementById('courseLogoOverrideDir');
-        const dirs = this.courseLogoDirectories || {};
-        if (defaultDir) defaultDir.textContent = dirs.defaultDirectory || '-';
-        if (overrideDir) overrideDir.textContent = dirs.overrideDirectory || '-';
-
         const courses = this.getCourseCatalog();
+        const count = document.getElementById('courseLogoCount');
+        if (count) {
+            count.textContent = `${courses.length} course${courses.length === 1 ? '' : 's'}`;
+        }
+
         if (courses.length === 0) {
             // Distinguish "still loading" from "nothing configured" so a guest or
             // an in-flight fetch does not flash a misleading empty state.
             list.innerHTML = this.courseCatalogLoadedAt
-                ? '<div class="text-muted small">No courses configured.</div>'
+                ? '<div class="empty-state"><i class="fas fa-image empty-state-icon"></i>'
+                  + '<h6 class="empty-state-title">No courses configured</h6>'
+                  + '<p class="empty-state-description small">Courses and their answer-sheet logos are seeded from the database.</p></div>'
                 : '<div class="text-muted small">Loading course logos...</div>';
             return;
         }
@@ -8516,43 +8517,46 @@ class ScanCheckApp {
             const preview = this.courseLogoPreviewUrl(course);
             const isOverride = course.logoSource === 'override';
 
-            const row = document.createElement('div');
-            row.className = 'd-flex align-items-center gap-3 p-3 border rounded-3 bg-white';
-            row.dataset.courseCode = course.code;
+            const tile = document.createElement('div');
+            tile.className = 'course-logo-tile';
+            tile.dataset.courseCode = course.code;
 
-            const thumb = document.createElement('div');
-            thumb.className = 'd-flex align-items-center justify-content-center border rounded-3 bg-light flex-shrink-0';
-            thumb.style.width = '64px';
-            thumb.style.height = '64px';
+            const stage = document.createElement('div');
+            stage.className = preview ? 'course-logo-stage' : 'course-logo-stage is-empty';
             if (preview) {
                 const img = document.createElement('img');
                 img.src = preview;
                 img.alt = `${course.name} logo`;
-                img.className = 'w-100 h-100';
-                img.style.objectFit = 'contain';
-                img.onerror = () => { thumb.textContent = '!'; };
-                thumb.appendChild(img);
+                img.onerror = () => {
+                    stage.className = 'course-logo-stage is-empty';
+                    stage.innerHTML = '<i class="fas fa-image text-muted"></i>';
+                };
+                stage.appendChild(img);
             } else {
-                thumb.innerHTML = '<i class="fas fa-image text-muted"></i>';
+                stage.innerHTML = '<i class="fas fa-image text-muted"></i>';
             }
 
-            const meta = document.createElement('div');
-            meta.className = 'flex-grow-1 min-w-0';
-            const badge = isOverride
-                ? '<span class="badge bg-success bg-opacity-10 text-success ms-2">Your logo</span>'
-                : '<span class="badge bg-secondary bg-opacity-10 text-secondary ms-2">Default</span>';
-            meta.innerHTML = `
-                <div class="fw-bold small">${course.name}${badge}</div>
-                <div class="text-muted small">${course.code} &middot; ${(course.aliases || []).length} accepted name(s)</div>
-            `;
+            const badge = document.createElement('div');
+            badge.className = 'mb-2 text-center';
+            badge.innerHTML = isOverride
+                ? '<span class="badge rounded-pill bg-success bg-opacity-10 text-success x-small">Your logo</span>'
+                : '<span class="badge rounded-pill bg-secondary bg-opacity-10 text-secondary x-small">Default</span>';
+
+            const name = document.createElement('div');
+            name.className = 'course-logo-tile-name';
+            name.textContent = course.name;
+
+            const code = document.createElement('div');
+            code.className = 'course-logo-tile-code';
+            code.textContent = course.code;
 
             const actions = document.createElement('div');
-            actions.className = 'd-flex gap-2 flex-shrink-0';
+            actions.className = 'course-logo-tile-actions';
 
             const replaceBtn = document.createElement('button');
             replaceBtn.type = 'button';
             replaceBtn.className = 'btn btn-sm btn-outline-primary';
-            replaceBtn.innerHTML = '<i class="fas fa-rotate me-1"></i> Replace Logo';
+            replaceBtn.innerHTML = '<i class="fas fa-rotate me-1"></i> Replace';
             replaceBtn.addEventListener('click', () => this.pickCourseLogoFile(course.code));
             actions.appendChild(replaceBtn);
 
@@ -8569,10 +8573,12 @@ class ScanCheckApp {
             removeBtn.addEventListener('click', () => this.removeCourseLogo(course.code));
             actions.appendChild(removeBtn);
 
-            row.appendChild(thumb);
-            row.appendChild(meta);
-            row.appendChild(actions);
-            list.appendChild(row);
+            tile.appendChild(stage);
+            tile.appendChild(badge);
+            tile.appendChild(name);
+            tile.appendChild(code);
+            tile.appendChild(actions);
+            list.appendChild(tile);
         }
     }
 
@@ -8638,10 +8644,6 @@ class ScanCheckApp {
             const response = await this.apiCallWithAuth('/api/courses', {}, 'loadCourseCatalog');
             const courses = Array.isArray(response?.courses) ? response.courses : [];
             this.setCourseCatalog(courses);
-            this.courseLogoDirectories = {
-                defaultDirectory: response?.defaultDirectory || '',
-                overrideDirectory: response?.overrideDirectory || ''
-            };
             return courses;
         } catch (error) {
             console.error('Error loading course catalog:', error);
